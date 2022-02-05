@@ -1,3 +1,4 @@
+mod audio;
 mod button;
 mod mtx;
 use anyhow::{Context, Result};
@@ -117,13 +118,13 @@ async fn run(args: &Run) -> Result<()> {
 			})
 			.await
 	});
-	let (textsender, textchannel) = mtx::textsender(channel);
-	let morse = args.button.map(|button| button::morse(button, textchannel));
+	let (textsender, textchannel) = mtx::oggsender(channel, client.clone());
+	let button = args.button.map(|button| button::read(button, textchannel));
 
 	tokio::select! {
 		e = sync => e?,
 		e = textsender => e?,
-		e = morse.unwrap(), if morse.is_some() => e?,
+		e = button.unwrap(), if button.is_some() => e?,
 	};
 	unreachable!("No task should exit, let alone successfully");
 }

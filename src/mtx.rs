@@ -1,4 +1,6 @@
+use crate::audio::Rec;
 use crate::*;
+use std::io::Cursor;
 
 #[tracing::instrument]
 fn create_client(hs: &Url) -> Result<Client> {
@@ -130,7 +132,7 @@ pub async fn channel(args: &Run, client: &Client) -> Result<JoinedRoom> {
 								true => LoopCtrl::Break,
 								false => match Instant::now() > timeout {
 									true => {
-										error!("Coudln't follow invitation");
+										error!("Couldn't follow invitation");
 										LoopCtrl::Break
 									}
 									false => LoopCtrl::Continue,
@@ -160,17 +162,38 @@ pub async fn channel(args: &Run, client: &Client) -> Result<JoinedRoom> {
 		.context("Not joined to a room")?)
 }
 
-pub fn textsender(room: JoinedRoom) -> (impl Future<Output = Result<()>>, mpsc::Sender<String>) {
-	let (tx, mut rx) = mpsc::channel(128);
+pub fn oggsender(
+	room: JoinedRoom,
+	client: Client,
+) -> (impl Future<Output = Result<()>>, mpsc::Sender<Rec>) {
+	let (tx, mut rx) = mpsc::channel::<Rec>(4);
 
 	let process = async move {
 		use matrix_sdk::ruma::events::{
-			room::message::MessageEventContent, AnyMessageEventContent,
+			room::message::{AudioMessageEventContent, MessageEventContent, MessageType},
+			AnyMessageEventContent,
 		};
 
 		loop {
-			let content = AnyMessageEventContent::RoomMessage(MessageEventContent::text_plain(
-				rx.recv().await.context("channel")?,
+			let Rec { data, info } = rx.recv().await.context("channel")?;
+
+			let data = client
+				.upload(
+					&info
+						.mimetype
+						.as_deref()
+						.unwrap_or("application/octet-stream")
+						.parse()?,
+					&mut Cursor::new(data),
+				)
+				.await?;
+
+			let content = AnyMessageEventContent::RoomMessage(MessageEventContent::new(
+				MessageType::Audio(AudioMessageEventContent::plain(
+					"Aufnahme".to_owned(),
+					data.content_uri,
+					Some(info.into()),
+				)),
 			));
 
 			let txn_id = Uuid::new_v4();

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use futures::executor::block_on;
 use rppal::gpio::Gpio;
 use rppal::gpio::InputPin;
 use rppal::gpio::Level;
@@ -8,6 +9,8 @@ use rppal::system::DeviceInfo;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::mpsc::Sender;
+
+use crate::audio;
 
 #[derive(Debug, PartialEq, Eq)]
 enum PinPoll {
@@ -154,37 +157,37 @@ impl Button {
 }
 
 #[tracing::instrument(skip(messages))]
-pub async fn morse(button: u8, messages: Sender<String>) -> Result<()> {
+pub async fn read(button: u8, messages: Sender<audio::Rec>) -> Result<()> {
 	tracing::info!(raspi=?DeviceInfo::new());
 	let mut button = Button::new(EdgeDeb::new(Gpio::new()?.get(button)?)?);
 	tokio::task::spawn_blocking(move || -> Result<()> {
 		loop {
-			let mut message = "Morsies: ".to_string();
 			let mut timeout = false;
+			let mut recording = None;
 			loop {
 				let et = button.next(match timeout {
-					true => Some(Instant::now() + Duration::from_secs(2)),
+					true => Some(Instant::now() + Duration::from_secs(20)),
 					false => None,
 				})?;
-				tracing::trace!(?message, ?et);
-				message += match et {
+				tracing::trace!(?et);
+				match et {
 					Some(Press::Short(_)) => {
-						timeout = true;
-						"・"
+						timeout = false;
+						recording = None;
 					}
 					Some(Press::LongStart(_)) => {
-						timeout = false;
-						"﹘"
-					}
-					Some(Press::LongEnd(_, _)) => {
 						timeout = true;
-						""
+						recording = Some(audio::RecProc::start());
 					}
+					Some(Press::LongEnd(_, _)) => break,
 					None => break,
 				};
 			}
-			tracing::debug!(?message, "send");
-			messages.blocking_send(message)?;
+			// TODO: loop structure..
+			if let Some(recording) = recording {
+				tracing::debug!("send");
+				messages.blocking_send(block_on(recording.finish())?)?;
+			}
 		}
 	})
 	.await??;

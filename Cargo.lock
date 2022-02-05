@@ -327,6 +327,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "event-listener"
+version = "2.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77f3309417938f28bf8228fcff79a4a37103981e3e186d2ccd19c74b38f4eb71"
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -790,12 +796,14 @@ checksum = "a3e378b66a060d48947b590737b30a1be76706c8dd7b8ba0f2fe3989c68a853f"
 
 [[package]]
 name = "matrix-sdk"
-version = "0.3.0"
-source = "git+https://github.com/matrix-org/matrix-rust-sdk.git?rev=623408913c6d557c37301e560cd7f1dcf4d79841#623408913c6d557c37301e560cd7f1dcf4d79841"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5834b96fef26d6d61c8ffd21dda3569c7c0fc688f9cc8aebd35f6f8c3068a186"
 dependencies = [
  "backoff",
  "bytes",
  "dashmap",
+ "event-listener",
  "futures",
  "futures-timer",
  "http",
@@ -804,6 +812,7 @@ dependencies = [
  "mime",
  "reqwest",
  "ruma",
+ "serde",
  "serde_json",
  "thiserror",
  "tokio",
@@ -815,8 +824,9 @@ dependencies = [
 
 [[package]]
 name = "matrix-sdk-base"
-version = "0.3.0"
-source = "git+https://github.com/matrix-org/matrix-rust-sdk.git?rev=623408913c6d557c37301e560cd7f1dcf4d79841#623408913c6d557c37301e560cd7f1dcf4d79841"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b97c4d675ff70395c1b0cd94fae869cea4efd3f148b74bf4186e969ee622a9c7"
 dependencies = [
  "dashmap",
  "futures",
@@ -833,8 +843,9 @@ dependencies = [
 
 [[package]]
 name = "matrix-sdk-common"
-version = "0.3.0"
-source = "git+https://github.com/matrix-org/matrix-rust-sdk.git?rev=623408913c6d557c37301e560cd7f1dcf4d79841#623408913c6d557c37301e560cd7f1dcf4d79841"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31c004ca5d02a17eb827a2c3d8e34c9a84c075b42cfed7022895ba6418372ea5"
 dependencies = [
  "async-trait",
  "futures",
@@ -1269,9 +1280,9 @@ dependencies = [
 
 [[package]]
 name = "ruma"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efd3b567d0ca13e963145e1700d4182fa371ce08b090245b1dd62c703b4579b4"
+checksum = "668031e3108d6a2cfbe6eca271d8698f4593440e71a44afdadcf67ce3cb93c1f"
 dependencies = [
  "assign",
  "js_int",
@@ -1354,9 +1365,9 @@ dependencies = [
 
 [[package]]
 name = "ruma-events"
-version = "0.24.4"
+version = "0.24.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d57fc671b688a4ce783ca5f6fa9075c1ff23673c36df5dca96ccca0e7a6052f"
+checksum = "5ba40ba9f4b6bdf6dc82b18ee7dfd7a029c86a12f9785a0efe4df04bd5dfa3c8"
 dependencies = [
  "indoc",
  "js_int",
@@ -1372,9 +1383,9 @@ dependencies = [
 
 [[package]]
 name = "ruma-events-macros"
-version = "0.24.4"
+version = "0.24.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "445d5e41b376a679b6c81d046da583a0b0be8e93c65345b917046619529fcfdd"
+checksum = "431a3dfadb48a8b7df9d00776274e32fed68df96cc19d9d9346bfed62540f91a"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1476,13 +1487,12 @@ dependencies = [
 
 [[package]]
 name = "ruma-state-res"
-version = "0.3.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab9e0bcdd66308d640c56ad17ea077c8ca80073852ed6692b455b39866b99c74"
+checksum = "518c1afbddfcc5ffac8818a5cf0902709e6eca11aca8f24f6479df6f0601f1ba"
 dependencies = [
  "itertools",
  "js_int",
- "maplit",
  "ruma-common",
  "ruma-events",
  "ruma-identifiers",

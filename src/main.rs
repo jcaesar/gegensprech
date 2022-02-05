@@ -1,7 +1,6 @@
 mod button;
 mod mtx;
 use anyhow::{Context, Result};
-use clap::Clap;
 use directories::ProjectDirs;
 use futures::stream::StreamExt;
 use gethostname::gethostname;
@@ -58,7 +57,7 @@ impl From<SessionData> for Session {
 	}
 }
 
-#[derive(Clap, Debug)]
+#[derive(clap::Parser, Debug)]
 enum Opts {
 	/// Generate configuration
 	Login(Login),
@@ -66,7 +65,7 @@ enum Opts {
 	Run(Run),
 }
 
-#[derive(Clap, Debug)]
+#[derive(clap::Parser, Debug)]
 pub struct Login {
 	/// Homeserver URL
 	#[clap(short = 's', long)]
@@ -82,7 +81,7 @@ pub struct Login {
 	overwrite: bool,
 }
 
-#[derive(Clap, Debug)]
+#[derive(clap::Parser, Debug)]
 pub struct Run {
 	/// Join channel (wait for invite if not provided)
 	#[clap(short, long)]
@@ -96,7 +95,7 @@ lazy_static::lazy_static! {
 	static ref CFGDIR: ProjectDirs = ProjectDirs::from("de", "liftm", env!("CARGO_CRATE_NAME"))
 		.expect("Can't determine settings directory");
 	static ref SESSION: PathBuf = CFGDIR.config_dir().join("session.json");
-	static ref OPTS: Opts = Opts::parse();
+	static ref OPTS: Opts = clap::Parser::parse();
 }
 
 #[tracing::instrument]

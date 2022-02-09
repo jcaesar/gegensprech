@@ -1,5 +1,12 @@
 use crate::audio::Rec;
 use crate::*;
+use matrix_sdk::{
+	room::Room,
+	ruma::events::{
+		room::message::{MessageEventContent, MessageType},
+		SyncMessageEvent,
+	},
+};
 use std::io::Cursor;
 
 #[tracing::instrument]
@@ -162,6 +169,7 @@ pub async fn channel(args: &Run, client: &Client) -> Result<JoinedRoom> {
 		.context("Not joined to a room")?)
 }
 
+#[tracing::instrument(skip(client))]
 pub fn oggsender(
 	room: JoinedRoom,
 	client: Client,
@@ -170,7 +178,7 @@ pub fn oggsender(
 
 	let process = async move {
 		use matrix_sdk::ruma::events::{
-			room::message::{AudioMessageEventContent, MessageEventContent, MessageType},
+			room::message::{AudioMessageEventContent, MessageType},
 			AnyMessageEventContent,
 		};
 
@@ -201,4 +209,30 @@ pub fn oggsender(
 		}
 	};
 	(process, tx)
+}
+
+#[tracing::instrument(skip(client))]
+pub async fn recv_audio_messages(client: &Client) -> mpsc::Receiver<Vec<u8>> {
+	let (tx, rx) = mpsc::channel::<Vec<u8>>(4);
+	client
+		.register_event_handler(
+			move |ev: SyncMessageEvent<MessageEventContent>, _room: Room, client: Client| {
+				let tx = tx.clone();
+				async move {
+					debug!(?ev, "received");
+					if let MessageType::Audio(amc) = ev.content.msgtype {
+						info!(?amc, "received audio");
+						let data = client.get_file(amc, false).await.expect("dl");
+						if let Some(data) = data {
+							tx.send(data).await.expect("pipesend");
+						} else {
+							warn!("audio event, no data file");
+						}
+					};
+					return ();
+				}
+			},
+		)
+		.await;
+	rx
 }

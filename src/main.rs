@@ -1,7 +1,7 @@
 mod audio;
 mod button;
 mod mtx;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use directories::ProjectDirs;
 use futures::stream::StreamExt;
 use gethostname::gethostname;
@@ -18,7 +18,7 @@ use std::fs::File;
 use std::future::Future;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 use url::Url;
 
 #[derive(Serialize, Deserialize)]
@@ -104,29 +104,19 @@ async fn run(args: &Run) -> Result<()> {
 	let client = mtx::start().await.context("Matrix startup")?;
 	let channel = mtx::channel(args, &client).await.context("Join channel")?;
 
-	let syncclient = client.clone(); // internally all Arcs
-	let sync = tokio::spawn(async move {
-		syncclient
-			.sync_with_callback(SyncSettings::default(), |response| async move {
-				trace!(?response);
-				for (_room_id, room) in response.rooms.join {
-					for event in room.timeline.events {
-						debug!(?event);
-					}
-				}
-				LoopCtrl::Continue
-			})
-			.await
-	});
+	let incoming = mtx::recv_audio_messages(&client).await;
+	let play = audio::play(incoming);
+	let sync = client.sync(SyncSettings::default());
 	let (textsender, textchannel) = mtx::oggsender(channel, client.clone());
 	let button = args.button.map(|button| button::read(button, textchannel));
 
 	tokio::select! {
-		e = sync => e?,
+		() = sync => bail!("Synchronization exited"),
 		e = textsender => e?,
 		e = button.unwrap(), if button.is_some() => e?,
+		e = play => e?,
 	};
-	unreachable!("No task should exit, let alone successfully");
+	bail!("No task should exit, let alone successfully");
 }
 
 #[tokio::main]

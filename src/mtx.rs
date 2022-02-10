@@ -8,6 +8,7 @@ use matrix_sdk::{
 	},
 };
 use std::io::Cursor;
+use tokio::sync::oneshot;
 
 #[tracing::instrument]
 fn create_client(hs: &Url) -> Result<Client> {
@@ -212,19 +213,42 @@ pub fn oggsender(
 }
 
 #[tracing::instrument(skip(client))]
-pub async fn recv_audio_messages(client: &Client) -> mpsc::Receiver<Vec<u8>> {
-	let (tx, rx) = mpsc::channel::<Vec<u8>>(4);
+pub async fn recv_audio_messages(
+	client: &Client,
+) -> mpsc::Receiver<(Vec<u8>, oneshot::Sender<()>)> {
+	let (tx, rx) = mpsc::channel(4);
 	client
 		.register_event_handler(
-			move |ev: SyncMessageEvent<MessageEventContent>, _room: Room, client: Client| {
+			move |ev: SyncMessageEvent<MessageEventContent>, room: Room, client: Client| {
 				let tx = tx.clone();
 				async move {
 					debug!(?ev, "received");
+					let eid = ev.event_id;
 					if let MessageType::Audio(amc) = ev.content.msgtype {
 						info!(?amc, "received audio");
 						let data = client.get_file(amc, false).await.expect("dl");
 						if let Some(data) = data {
-							tx.send(data).await.expect("pipesend");
+							let (play, played) = oneshot::channel();
+							tx.send((data, play)).await.expect("pipesend");
+							tokio::spawn(async move {
+								let res = (move || async move {
+									let room = match room {
+										Room::Joined(j) => Some(j),
+										_ => None,
+									}
+									.context("Room not joined")?;
+									let x = played.await;
+									x.context("Not played")?;
+									room.read_marker(&eid, Some(&eid))
+										.await
+										.context("Marker request error")?;
+									Result::<_, anyhow::Error>::Ok(())
+								})()
+								.await;
+								if let Err(e) = res {
+									warn!(?e, "Didn't set read marker")
+								}
+							});
 						} else {
 							warn!("audio event, no data file");
 						}

@@ -81,15 +81,16 @@ impl RecProc {
 	}
 }
 
-pub async fn play(mut incoming: mpsc::Receiver<Vec<u8>>) -> Result<()> {
+pub async fn play(mut incoming: mpsc::Receiver<(Vec<u8>, oneshot::Sender<()>)>) -> Result<()> {
 	loop {
 		let data = incoming.recv().await;
 		let data = match data {
 			Some(data) => data,
 			None => continue,
 		};
+		let (data, played) = data;
 		let proc = spawn_blocking(move || -> Result<_> {
-			let _guard = MUTEX.lock();
+			let _guard = MUTEX.lock().unwrap();
 			let (data, meta) =
 				ogg_opus::decode::<_, 16000>(Cursor::new(data)).context("OGG Opus decode")?;
 			let spec = Spec {
@@ -119,8 +120,12 @@ pub async fn play(mut incoming: mpsc::Receiver<Vec<u8>>) -> Result<()> {
 			output.drain()?;
 			Ok(())
 		});
-		if let Err(e) = proc.await?.context("play") {
-			tracing::error!(?e, "Playback failed");
+		match proc.await?.context("play") {
+			Ok(()) => {
+				// Unused variable bug?
+				played.send(()).ok();
+			}
+			Err(e) => tracing::error!(?e, "Playback failed"),
 		}
 	}
 }

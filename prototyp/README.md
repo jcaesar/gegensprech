@@ -14,12 +14,15 @@ This clearly revealed several flaws:
    Blch.
 
    The next version will have a hole in the case so the microphone can be plugged into the USB sockets directly.
+ * I originally tried to give it a nice MicroUSB plug for power supply -
+   soldering wires to that to steal 5V turned out to be impossible for my shaky fingers.
+   Instead, I just used a cheap USB/TTL cable, for the added benefit that I can debug boot/wifi connection problems without having to open the device.
  * Despite the [model](model.csg) being already optimized to be printable on my third-rate 3D printer,
    I'll still need to go simpler, since it still failed in several places:
    * The edges of the front wall that slides into the rest of the case develop bulge and become too thick -
      a rasp fixes that, but maybe I can make them triangular to prevent the problem.
    * Extruder trouble. :(
- * The model has a slight flaw, where the frame surrounding the front was printed twice in once place.
+ * The 3D model had a slight flaw, where the frame surrounding the front was printed twice in once place.
    For the prototype, I corrected that with a knife.
  * The microphone quality is bad - really bad.
    Which I don't understand yet.
@@ -30,7 +33,8 @@ Despite all these flaws, it's fun to play with.
 Now I definitely want two of these, so I can actually use them for communication.
 
 Innards:
-![prototype open picture](prototyp_open.jpg)
+![prototype open picture](prototyp_offen.jpg)
+The front plate ripped because the extruder decided that it didn't wanna work, for a layer or two. It turns out that that's actually not much of a problem.
 
 Model rendering:
 ![print model rendering](model.jpg)

@@ -1,5 +1,5 @@
 # Gegensprechanlage
-*Minimum viable prototype*
+*Minimum viable [prototype](./prototyp)*
 
 My wife keeps calling me from a different room, I keep not hearing. And it's oh so far.
 Time to solve that problem with technology.

@@ -20,7 +20,7 @@ module centercube(size, center=[1, 1, 0]) {
 }
 
 td = d + 3 * wall + 2 * spiel;
-%rotate([90, 0, 0]) translate([w * 2, wall + h / 2, 0])
+rotate([90, 0, 0]) translate([w * 1.2, wall + h / 2, 0])
 	union() {
 		// main box
 		difference() {
@@ -69,8 +69,8 @@ difference() {
 			cube([w + 2*wall, d + 3 * wall + 2 * spiel, wall]);
 		translate([- w / 2 + spiel, 0])
 			cube([w - 2*spiel, wall, h + 2 * wall - spiel]);
-		translate([- w / 2 + spiel, 0])
-			cube([w - 2*spiel, 2 * wall + spiel, 2 * wall]);
+		translate([- w / 2 + spiel + wall, 0])
+			cube([w - 2 * spiel - 2 * wall, 2 * wall + spiel, 2 * wall]);
 		translate(lautc)
 			difference() {
 				translate([- lautk / 2 - wall, - lauth - wall, - lautk / 2 - 3 * wall])

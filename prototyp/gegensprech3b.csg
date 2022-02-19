@@ -1,0 +1,140 @@
+w=98.5;
+h=62;
+d=40;
+
+wall=1.5;
+spiel=0.5;
+// wall muss kleiner als 2 sein, oder der knopf braucht eine extra ausspaarung
+// selbiges für den usb-stecker
+$fn=180;
+
+usbd = 13 * 2;
+usbb = 8;
+usbh = 3;
+usbt = 11;
+usbx = 3 - wall;
+
+module centercube(size, center=[1, 1, 0]) {
+	translate([- size[0] / 2 * center[0], - size[1] / 2 * center[1], - size[2] / 2 * center[2]]) 
+		cube(size);
+}
+
+td = d + 3 * wall + 2 * spiel;
+%rotate([90, 0, 0]) translate([w * 2, wall + h / 2, 0])
+	union() {
+		// main box
+		difference() {
+			centercube([w + 2 * wall, h + 2 * wall, td]);
+			union() {
+				translate([0,wall,wall])
+					centercube([w, h + 2 * wall, d + 3 * wall + 2 * spiel]);
+				// usb hole
+				translate([w / 2 - wall, -h / 2 + usbx, td / 2 - usbb / 2])
+					cube([3 * wall, usbh, usbb]);
+			}
+		}
+		// slide
+		difference() {
+			union() {
+				translate([0, 0, d])
+					centercube([w + 2 * wall, h + 2 * wall, wall]);
+				translate([0, 0, d+2 * wall + 2 * spiel])
+					centercube([w + 2 * wall, h + 2 * wall, wall]);
+			}
+			translate([0, 2 * wall, 0])
+				centercube([w - 2 * wall, h + 2 * wall, d + 3 * wall + 3 * spiel]);
+		}
+		// usb resting place
+		translate([w / 2 - usbt, -h / 2 - wall, td / 2 - usbd / 2])
+			cube([usbt + wall, usbx + wall, usbd]);
+	}
+
+lautr = 47 / 2;
+lautk = 53;
+lautc = [w / 2 - spiel - h / 2, 0, h / 2 + wall];
+lauth = 2;
+
+knopfn = 4 + spiel;
+knopfk = 6 + spiel;
+knopfr = 12;
+knopfd = 4.2;
+knopfc = [- 28, 0, 15];
+
+ledr = 5 / 2;
+leth = 7;
+
+difference() {
+	union() {
+		translate([- w / 2 - wall, - d - wall - spiel  ])
+			cube([w + 2*wall, d + 3 * wall + 2 * spiel, wall]);
+		translate([- w / 2 + spiel, 0])
+			cube([w - 2*spiel, wall, h + 2 * wall - spiel]);
+		translate([- w / 2 + spiel, 0])
+			cube([w - 2*spiel, 2 * wall + spiel, 2 * wall]);
+		translate(lautc)
+			difference() {
+				translate([- lautk / 2 - wall, - lauth - wall, - lautk / 2 - 3 * wall])
+					cube([lautk + 2 * wall, lauth + 2 * wall, lautk + 4 * wall]);
+				rotate([90, 0, 0])
+					hull() {
+						cylinder(r=lautk / 2, h=3*lauth + wall);
+						translate([lautk, lautk, 0])
+							cylinder(r=lautk / 2, h=3*lauth + wall);
+					}
+				//translate([- lautk / 2 - 3 *  wall, - lauth - 2 * wall, - lautk / 2 - wall])
+				//	rotate([0, -45, 0])
+				//		cube([2 * lautk + 2 * wall, lauth + 3 * wall + lauth, lautk + 2 * wall]);
+				translate([- lautk / 2, - lauth, - lautk / 2])
+					hull() {
+						cube([lautk, lauth, lautk]);
+						translate([lautk, 0, lautk])
+							cube([lautk, lauth, lautk]);
+					}
+			}
+		translate(knopfc) {
+			translate([0, - knopfd - wall, knopfr / 2 - spiel])
+				centercube([knopfr - wall, wall, knopfr / 2 - 2 * spiel + knopfc[2]], [1,0,2]);
+			translate([0, 0, knopfr / 2 - spiel])
+				difference() {
+					stuetz = 7;
+					kh = knopfr / 2 - 2 * spiel + knopfc[2];
+					centercube([wall, stuetz + knopfd, kh], [1,2,2]);
+					translate([-2 * wall, - stuetz - knopfd, 0])
+						scale([1, 1, (kh - wall + spiel) / (stuetz - wall)])
+							rotate([0, 90, 0])
+								cylinder(r = stuetz - wall, h = 3 * wall);
+				}
+		}
+	}
+	// Sprecherloch
+	translate([0, 2 * wall, 0])
+		translate(lautc)
+			difference() {
+				rotate([90, 0, 0])
+					cylinder(r=lautr, h=3*wall);
+				for(i = [-lautr + 1.5 * wall : wall * 4 : lautr + wall])
+					for(r = [-30, 30])
+						rotate([0, r, 0])
+							translate([i, 0, 0])
+								cube([wall, 10 * wall, 3 * d], center=true);
+			}
+	// Knopfloch
+	translate(knopfc) {
+		translate([- knopfn / 2, - wall])
+			cube([knopfn, wall * 3, knopfr + knopfn / 2]);
+		translate([- knopfk / 2, - wall, - knopfk / 2])
+			hull() {
+				cube([knopfk, wall * 3, knopfk]);
+				translate([knopfk / 2 - knopfn / 2, 0, knopfk + spiel])
+					cube([knopfn, wall * 3, knopfk / 2 - knopfn / 2]);
+			}
+		translate([- knopfr / 2, - knopfd, - knopfr / 2])
+			cube([knopfr, knopfd, knopfr]);
+	}
+	// LED
+	translate(knopfc)
+		translate([0, 2 * wall, 30])
+			rotate([90, 0, 0])
+				cylinder(r=ledr, h=3*wall);
+	
+}

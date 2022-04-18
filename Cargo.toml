@@ -3,8 +3,6 @@ name = "gegensprech"
 version = "0.0.0"
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 url = { version = "2.2", features = ["serde"] }
@@ -27,3 +25,11 @@ libpulse-simple-binding = "2.25.0"
 libpulse-binding = "2.26.0"
 ogg-opus = "0.1.2"
 itertools = "0.10.3"
+
+[features]
+default = ["matrix-sdk/rustls-tls"]
+native-tls = ["matrix-sdk/native-tls"]
+
+[patch.crates-io]
+#audiopus = { version = "0.3.0-rc.0" } # be nice if this worked.. :/
+ogg-opus = { git = "https://github.com/jcaesar/ogg-opus" }

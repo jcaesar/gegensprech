@@ -215,7 +215,7 @@ pub fn oggsender(
 #[tracing::instrument(skip(client))]
 pub async fn recv_audio_messages(
 	client: &Client,
-) -> mpsc::Receiver<(Vec<u8>, oneshot::Sender<()>)> {
+) -> mpsc::Receiver<(Vec<u8>, Option<String>, oneshot::Sender<()>)> {
 	let (tx, rx) = mpsc::channel(4);
 	client
 		.register_event_handler(
@@ -226,10 +226,15 @@ pub async fn recv_audio_messages(
 					let eid = ev.event_id;
 					if let MessageType::Audio(amc) = ev.content.msgtype {
 						info!(?amc, "received audio");
+						let mtyp = amc
+							.info
+							.as_ref()
+							.and_then(|info| info.mimetype.as_ref())
+							.cloned();
 						let data = client.get_file(amc, false).await.expect("dl");
 						if let Some(data) = data {
 							let (play, played) = oneshot::channel();
-							tx.send((data, play)).await.expect("pipesend");
+							tx.send((data, mtyp, play)).await.expect("pipesend");
 							tokio::spawn(async move {
 								let res = (move || async move {
 									let room = match room {

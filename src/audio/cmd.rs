@@ -3,9 +3,10 @@ use anyhow::{Context, Result};
 use matrix_sdk::ruma::{events::room::message::AudioInfo, UInt};
 use std::{
 	io::{Read, Write},
+	mem,
 	process::{Command, Stdio},
-	thread,
-	time::Instant,
+	thread::{self, sleep},
+	time::{Duration, Instant},
 };
 use tokio::sync::oneshot;
 
@@ -27,10 +28,8 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 		.args([
 			"--record",
 			CLIENT_NAME_ARG,
-			"--fix-format",
-			"--fix-rate",
-			"--fix-channels",
 			"--file-format=ogg",
+			"--process-time-msec=50",
 		])
 		.stdin(Stdio::null())
 		.stdout(Stdio::piped())
@@ -42,6 +41,8 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 	let stdout = read_pipe(recorder.stdout.take().unwrap());
 	let stderr = read_pipe(recorder.stderr.take().unwrap());
 	cont.blocking_recv().ok();
+	// Dirty workaround: recordings end too quickly
+	sleep(Duration::from_millis(500));
 	unsafe {
 		libc::kill(pid as _, libc::SIGINT);
 	}
@@ -64,9 +65,17 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 }
 
 #[tracing::instrument(skip(data))]
-pub(crate) fn play(data: Vec<u8>) -> Result<()> {
+pub(crate) fn play(data: Vec<u8>, mtyp: Option<String>) -> Result<()> {
+	let ftyp = match mtyp {
+		Some(mtyp) => match mtyp.strip_prefix("media/") {
+			Some(ftyp) => ftyp.to_string(),
+			None => anyhow::bail!("Can only play audio media/*, got {}", mtyp),
+		},
+		None => anyhow::bail!("Can't play data with unknown type"),
+	};
 	let mut player = Command::new("pacat")
 		.args(["--playback", CLIENT_NAME_ARG])
+		.arg(format!("--file-format={}", ftyp))
 		.stdin(Stdio::piped())
 		.stdout(Stdio::piped())
 		.stderr(Stdio::piped())
@@ -78,6 +87,7 @@ pub(crate) fn play(data: Vec<u8>) -> Result<()> {
 	if stdin.write_all(&data).is_err() {
 		player.kill().ok();
 	};
+	mem::drop(stdin);
 	match player.wait() {
 		Ok(status) if status.success() => Ok(()),
 		Ok(_fail) => {

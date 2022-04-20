@@ -1,5 +1,4 @@
 use std::io::Cursor;
-
 use super::Rec;
 use anyhow::{Context, Result};
 use itertools::Itertools;

@@ -3,11 +3,9 @@ mod cmd;
 #[cfg(feature = "audio-as-lib")]
 mod pulse;
 
-use std::sync::Mutex;
-
 use anyhow::{Context, Result};
-
 use matrix_sdk::ruma::events::room::message::AudioInfo;
+use std::sync::Mutex;
 use tokio::{
 	sync::{mpsc, oneshot},
 	task::{spawn_blocking, JoinHandle},
@@ -46,20 +44,22 @@ impl RecProc {
 	}
 }
 
-pub async fn play(mut incoming: mpsc::Receiver<(Vec<u8>, oneshot::Sender<()>)>) -> Result<()> {
+pub async fn play(
+	mut incoming: mpsc::Receiver<(Vec<u8>, Option<String>, oneshot::Sender<()>)>,
+) -> Result<()> {
 	loop {
 		let data = incoming.recv().await;
 		let data = match data {
 			Some(data) => data,
 			None => continue,
 		};
-		let (data, played) = data;
+		let (data, mtyp, played) = data;
 		let proc = spawn_blocking(move || -> Result<_> {
 			let _guard = MUTEX.lock().unwrap();
 			#[cfg(feature = "audio-as-lib")]
-			pulse::play(data)?;
+			pulse::play(data, mtyp)?;
 			#[cfg(not(feature = "audio-as-lib"))]
-			cmd::play(data)?;
+			cmd::play(data, mtyp)?;
 			Ok(())
 		});
 		match proc.await?.context("play") {

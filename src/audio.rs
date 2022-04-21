@@ -2,9 +2,11 @@
 mod cmd;
 #[cfg(feature = "audio-as-lib")]
 mod pulse;
-
+use crate::status;
+use crate::status::AudioStatus;
 use anyhow::{Context, Result};
 use matrix_sdk::ruma::events::room::message::AudioInfo;
+use once_cell::sync::OnceCell;
 use std::sync::Mutex;
 use tokio::{
 	sync::{mpsc, oneshot},
@@ -31,6 +33,7 @@ impl RecProc {
 		let (done, cont) = oneshot::channel::<()>();
 		let proc = spawn_blocking(move || {
 			let _guard = MUTEX.lock();
+			let _guard = status::audio(AudioStatus::Recording);
 			#[cfg(feature = "audio-as-lib")]
 			return pulse::record(cont);
 			#[cfg(not(feature = "audio-as-lib"))]
@@ -56,6 +59,7 @@ pub async fn play(
 		let (data, mtyp, played) = data;
 		let proc = spawn_blocking(move || -> Result<_> {
 			let _guard = MUTEX.lock().unwrap();
+			let _guard = status::audio(AudioStatus::Playing);
 			#[cfg(feature = "audio-as-lib")]
 			pulse::play(data, mtyp)?;
 			#[cfg(not(feature = "audio-as-lib"))]

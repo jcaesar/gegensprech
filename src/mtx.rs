@@ -1,5 +1,5 @@
-use crate::audio::Rec;
 use crate::*;
+use crate::{audio::Rec, status::MtxStatus};
 use matrix_sdk::{
 	room::Room,
 	ruma::events::{
@@ -77,10 +77,12 @@ pub async fn start() -> Result<Client> {
 	let client = create_client(&sess.homeserver)?;
 	client.restore_login(sess.into()).await?;
 	debug!(woami=?client.whoami().await, "logged in");
+	status::mtx(MtxStatus::Starting);
 	let sync = client
 		.sync_once(SyncSettings::default())
 		.await
 		.context("sync")?;
+	status::mtx(MtxStatus::Good);
 	debug!(?sync, "synced");
 	trace!(?sync, "synced");
 	Ok(client)

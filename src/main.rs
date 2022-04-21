@@ -1,6 +1,7 @@
 mod audio;
 mod button;
 mod mtx;
+mod status;
 use anyhow::{bail, Context, Result};
 use directories::ProjectDirs;
 use futures::stream::StreamExt;
@@ -87,6 +88,21 @@ pub struct Run {
 	/// Join channel (wait for invite if not provided)
 	#[clap(short, long)]
 	channel: Option<RoomId>,
+	/// Hardware
+	#[clap(subcommand)]
+	hardware: Hardware,
+}
+
+#[derive(clap::Parser, Debug)]
+enum Hardware {
+	/// Seeed 2mic HAT
+	Seeed2Mic,
+	/// Custom buttons/LEDs
+	SolderedCustom(SolderedCustom),
+}
+
+#[derive(clap::Parser, Debug)]
+struct SolderedCustom {
 	/// GPIO button number for control
 	#[clap(short, long)]
 	button: Option<u8>,
@@ -101,6 +117,7 @@ lazy_static::lazy_static! {
 
 #[tracing::instrument]
 async fn run(args: &Run) -> Result<()> {
+	let _leds = status::init_from_args(&args.hardware);
 	let client = mtx::start().await.context("Matrix startup")?;
 	let channel = mtx::channel(args, &client).await.context("Join channel")?;
 
@@ -108,7 +125,11 @@ async fn run(args: &Run) -> Result<()> {
 	let play = audio::play(incoming);
 	let sync = client.sync(SyncSettings::default());
 	let (textsender, textchannel) = mtx::oggsender(channel, client.clone());
-	let button = args.button.map(|button| button::read(button, textchannel));
+	let button = match args.hardware {
+		Hardware::Seeed2Mic => Some(17),
+		Hardware::SolderedCustom(SolderedCustom { button, .. }) => button,
+	};
+	let button = button.map(|button| button::read(button, textchannel));
 
 	tokio::select! {
 		() = sync => bail!("Synchronization exited"),

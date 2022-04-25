@@ -1,12 +1,13 @@
 use crate::audio::Rec;
 use anyhow::{Context, Result};
 use matrix_sdk::ruma::{events::room::message::AudioInfo, UInt};
+use signal_child::Signalable;
 use std::{
 	io::{Read, Write},
 	mem,
 	process::{Command, Stdio},
-	thread::{self, sleep},
-	time::{Duration, Instant},
+	thread,
+	time::Instant,
 };
 use tokio::sync::oneshot;
 
@@ -29,7 +30,7 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 			"--record",
 			CLIENT_NAME_ARG,
 			"--file-format=ogg",
-			"--process-time-msec=50",
+			"--latency-msec=50",
 		])
 		.stdin(Stdio::null())
 		.stdout(Stdio::piped())
@@ -37,15 +38,10 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 		.spawn()
 		.context("$ pacat --record")?;
 	let start = Instant::now();
-	let pid = recorder.id();
 	let stdout = read_pipe(recorder.stdout.take().unwrap());
 	let stderr = read_pipe(recorder.stderr.take().unwrap());
 	cont.blocking_recv().ok();
-	// Dirty workaround: recordings end too quickly
-	sleep(Duration::from_millis(500));
-	unsafe {
-		libc::kill(pid as _, libc::SIGINT);
-	}
+	recorder.interrupt().context("Stop subcommand")?;
 	match recorder.wait() {
 		Ok(ok) if ok.success() => {
 			let data = stdout.blocking_recv().unwrap();

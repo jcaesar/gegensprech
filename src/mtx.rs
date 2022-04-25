@@ -1,3 +1,4 @@
+use crate::status::SendStatus;
 use crate::*;
 use crate::{audio::Rec, status::MtxStatus};
 use matrix_sdk::{
@@ -184,10 +185,17 @@ pub fn oggsender(
 			room::message::{AudioMessageEventContent, MessageType},
 			AnyMessageEventContent,
 		};
+		client
+			.register_event_handler(
+				move |ev: SyncMessageEvent<MessageEventContent>, room: Room, client: Client| async move {
+				},
+			)
+			.await;
 
+		status::send(SendStatus::Normal);
 		loop {
 			let Rec { data, info } = rx.recv().await.context("channel")?;
-
+			status::send(SendStatus::Uploading);
 			let data = client
 				.upload(
 					&info

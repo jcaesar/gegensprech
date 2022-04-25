@@ -495,7 +495,6 @@ dependencies = [
  "gethostname",
  "itertools",
  "lazy_static",
- "libc",
  "libpulse-binding",
  "libpulse-simple-binding",
  "matrix-sdk",
@@ -505,6 +504,7 @@ dependencies = [
  "rppal",
  "serde",
  "serde_json",
+ "signal-child",
  "smart-leds-trait",
  "structopt",
  "tokio",
@@ -1759,6 +1759,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-child"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2a4eed4c5ae38438470ab8e0108bb751012f786f44ff585cfd837c9a5fe426f"
+
+[[package]]
+name = "signal-hook-registry"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e51e73328dc4ac0c7ccbda3a494dfa03df1de2f46018127f60c693f2648455b0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "signature"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1964,7 +1979,9 @@ dependencies = [
  "memchr",
  "mio",
  "num_cpus",
+ "once_cell",
  "pin-project-lite",
+ "signal-hook-registry",
  "tokio-macros",
  "winapi",
 ]

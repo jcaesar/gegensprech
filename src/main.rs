@@ -18,7 +18,11 @@ use std::fs;
 use std::fs::File;
 use std::future::Future;
 use std::path::PathBuf;
-use tokio::sync::mpsc;
+use std::process::exit;
+use tokio::{
+	signal::unix::{signal, SignalKind},
+	sync::mpsc,
+};
 use tracing::{debug, error, info, trace, warn};
 use url::Url;
 
@@ -96,6 +100,7 @@ pub struct Run {
 #[derive(clap::Parser, Debug)]
 enum Hardware {
 	/// Seeed 2mic HAT
+	#[clap(name = "seeed-2mic")]
 	Seeed2Mic,
 	/// Custom buttons/LEDs
 	SolderedCustom(SolderedCustom),
@@ -115,9 +120,11 @@ lazy_static::lazy_static! {
 	static ref OPTS: Opts = clap::Parser::parse();
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(args))]
 async fn run(args: &Run) -> Result<()> {
-	let _leds = status::init_from_args(&args.hardware);
+	let ctrl_c = tokio::signal::ctrl_c();
+	let mut term = signal(SignalKind::terminate())?;
+	let _leds = status::init_from_args(&args.hardware).context("Status LED init")?;
 	let client = mtx::start().await.context("Matrix startup")?;
 	let channel = mtx::channel(args, &client).await.context("Join channel")?;
 
@@ -136,6 +143,8 @@ async fn run(args: &Run) -> Result<()> {
 		e = textsender => e?,
 		e = button.unwrap(), if button.is_some() => e?,
 		e = play => e?,
+		_ = ctrl_c => return Ok(()),
+		_ = term.recv() => return Ok(()),
 	};
 	bail!("No task should exit, let alone successfully");
 }
@@ -149,5 +158,6 @@ async fn main() -> Result<()> {
 	match &*OPTS {
 		Opts::Login(args) => mtx::login(args).await,
 		Opts::Run(args) => run(args).await,
-	}
+	}?;
+	exit(0);
 }

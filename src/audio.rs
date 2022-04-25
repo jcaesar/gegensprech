@@ -6,7 +6,6 @@ use crate::status;
 use crate::status::AudioStatus;
 use anyhow::{Context, Result};
 use matrix_sdk::ruma::events::room::message::AudioInfo;
-use once_cell::sync::OnceCell;
 use std::sync::Mutex;
 use tokio::{
 	sync::{mpsc, oneshot},

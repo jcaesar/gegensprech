@@ -1,10 +1,11 @@
 use crate::audio::Rec;
 use anyhow::{Context, Result};
+use itertools::Itertools;
 use matrix_sdk::ruma::{events::room::message::AudioInfo, UInt};
 use signal_child::Signalable;
 use std::{
 	borrow::Cow,
-	io::{Read, Write},
+	io::{Cursor, Read, Write},
 	mem,
 	os::unix::process::ExitStatusExt,
 	process::{Command, Stdio},
@@ -12,7 +13,7 @@ use std::{
 	time::Instant,
 };
 use tokio::sync::oneshot;
-use tracing::debug;
+use tracing::{debug, warn};
 
 static CLIENT_NAME_ARG: &'static str = concat!("--client-name=", env!("CARGO_PKG_NAME"));
 
@@ -32,7 +33,10 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 		.args([
 			"--record",
 			CLIENT_NAME_ARG,
-			"--file-format=ogg",
+			"--raw",
+			"--format=s16le",
+			"--channels=1",
+			"--rate=48000",
 			"--latency-msec=50",
 		])
 		.stdin(Stdio::null())
@@ -55,6 +59,12 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 	);
 	if exited.success() || exited.signal() == Some(1) {
 		let data = stdout.blocking_recv().unwrap();
+		let data = data
+			.into_iter()
+			.tuples()
+			.map(|(a, b)| i16::from_le_bytes([a, b]))
+			.collect::<Vec<_>>();
+		let data = ogg_opus::encode::<48000, 1>(&data).context("OGG Opus encode")?;
 		let mut info: AudioInfo = AudioInfo::new();
 		info.duration = UInt::new(Instant::now().duration_since(start).as_secs());
 		info.mimetype = Some("media/ogg".to_owned());
@@ -73,16 +83,23 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 
 #[tracing::instrument(skip(data))]
 pub(crate) fn play(data: Vec<u8>, mtyp: Option<String>) -> Result<()> {
-	let ftyp = match mtyp {
-		Some(mtyp) => match mtyp.strip_prefix("media/") {
-			Some(ftyp) => ftyp.to_string(),
-			None => anyhow::bail!("Can only play audio media/*, got {}", mtyp),
-		},
-		None => anyhow::bail!("Can't play data with unknown type"),
-	};
+	let (data, meta) =
+		ogg_opus::decode::<_, 48000>(Cursor::new(data)).context("OGG Opus decode")?;
+	let data = data
+		.into_iter()
+		.flat_map(|s| s.to_le_bytes())
+		.collect::<Vec<_>>();
+	// Since we're already shelling out, why not shell out to ffmpeg if the ogg decode fails...
+	// Another day.
 	let mut player = Command::new("pacat")
-		.args(["--playback", CLIENT_NAME_ARG])
-		.arg(format!("--file-format={}", ftyp))
+		.args([
+			"--playback",
+			CLIENT_NAME_ARG,
+			"--raw",
+			"--format=s16le",
+			"--rate=48000",
+		])
+		.arg(format!("--channels={}", meta.channels))
 		.stdin(Stdio::piped())
 		.stdout(Stdio::piped())
 		.stderr(Stdio::piped())
@@ -91,25 +108,37 @@ pub(crate) fn play(data: Vec<u8>, mtyp: Option<String>) -> Result<()> {
 	let stdout = read_pipe(player.stdout.take().unwrap());
 	let stderr = read_pipe(player.stderr.take().unwrap());
 	let mut stdin = player.stdin.take().unwrap();
-	if stdin.write_all(&data).is_err() {
+	let written = stdin.write_all(&data);
+	if written.is_err() {
+		warn!(?written, "pipe write error, kill pacat");
 		player.kill().ok();
 	};
 	mem::drop(stdin);
-	match player.wait() {
-		Ok(status) if status.success() => Ok(()),
-		Ok(_fail) => {
-			let stdout = &stdout.blocking_recv().unwrap();
-			let stdout = String::from_utf8_lossy(stdout);
-			let stderr = &stderr.blocking_recv().unwrap();
-			let stderr = String::from_utf8_lossy(stderr);
-			let msg = match (stdout.is_empty(), stderr.is_empty()) {
-				(false, false) => format!("Msg:\n{}Err:\n{}", stdout, stderr).into(),
-				(true, false) => stdout,
-				(false, true) => stderr,
-				(true, true) => "(silent failure)".into(),
-			};
-			anyhow::bail!("{}", msg)
-		}
-		Err(e) => Err(e).context("Process exit waiting failure"),
+	let exited = player.wait().context("Process exit waiting failure")?;
+	let stdout = &stdout.blocking_recv().unwrap();
+	let stdout = String::from_utf8_lossy(stdout);
+	let stderr = &stderr.blocking_recv().unwrap();
+	let stderr = String::from_utf8_lossy(stderr);
+	debug!(
+		?exited,
+		?stdout,
+		?stderr,
+		?written,
+		input_len = data.len(),
+		success = exited.success(),
+		code = exited.code(),
+		signal = exited.signal(),
+		"pacat exited"
+	);
+	written.context("Write to pacat")?;
+	if !exited.success() {
+		let msg = match (stdout.is_empty(), stderr.is_empty()) {
+			(false, false) => format!("Msg:\n{}Err:\n{}", stdout, stderr).into(),
+			(true, false) => stderr,
+			(false, true) => stdout,
+			(true, true) => "(silent failure)".into(),
+		};
+		anyhow::bail!("{}", msg);
 	}
+	Ok(())
 }

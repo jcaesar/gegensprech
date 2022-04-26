@@ -52,11 +52,11 @@ echo '
 [target.armv7-unknown-linux-musleabihf]
 #rustflags = ["-L/usr/arm-linux-gcceabihf/lib/", "-L/usr/lib/arm-linux-gcceabihf/", "-L/usr/lib/gcc-cross/arm-linux-gcceabihf/10/"]
 #linker = "/usr/bin/arm-linux-gcceabihf-g++"
-rustflags = ["-L/usr/local/armv7l-linux-musleabihf-cross/armv7l-linux-musleabihf/lib/"]
+rustflags = ["-L/usr/local/armv7l-linux-musleabihf-cross/armv7l-linux-musleabihf/lib/", "-C", "link-args=-lm -lc"]
 linker = "/usr/local/armv7l-linux-musleabihf-cross/armv7l-linux-musleabihf/bin/ld"
 '> "$root/emk-cargo/config.toml"
 
-#set -x
+set -x
 podman run --rm \
     -w "/root/src/serialsensors" \
     -v "$root:/root/src/serialsensors:ro" \

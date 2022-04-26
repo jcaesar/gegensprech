@@ -16,10 +16,18 @@ lazy_static::lazy_static! {
 	static ref MUTEX: Mutex<()> = Mutex::new(());
 }
 
-#[derive(Debug)]
 pub struct Rec {
 	pub data: Vec<u8>,
 	pub info: AudioInfo,
+}
+
+impl std::fmt::Debug for Rec {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("Rec")
+			.field("data", &format!("[u8; {}]", self.data.len()))
+			.field("info", &self.info)
+			.finish()
+	}
 }
 
 pub struct RecProc {

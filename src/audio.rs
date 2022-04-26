@@ -28,6 +28,7 @@ pub struct RecProc {
 }
 
 impl RecProc {
+	#[tracing::instrument]
 	pub fn start() -> Self {
 		let (done, cont) = oneshot::channel::<()>();
 		let proc = spawn_blocking(move || {
@@ -40,12 +41,18 @@ impl RecProc {
 		});
 		RecProc { done, proc }
 	}
+	#[tracing::instrument(skip(self))]
 	pub async fn finish(self) -> Result<Rec> {
 		self.done.send(()).ok();
-		Ok(self.proc.await??)
+		Ok(self
+			.proc
+			.await
+			.context("Recording spawn error")?
+			.context("Recording error")?)
 	}
 }
 
+#[tracing::instrument(skip(incoming))]
 pub async fn play(
 	mut incoming: mpsc::Receiver<(Vec<u8>, Option<String>, oneshot::Sender<()>)>,
 ) -> Result<()> {

@@ -194,7 +194,7 @@ pub fn oggsender(
 
 		status::send(SendStatus::Normal);
 		loop {
-			let Rec { data, info } = rx.recv().await.context("channel")?;
+			let Rec { data, info } = rx.recv().await.context("recorder sender")?;
 			status::send(SendStatus::Uploading);
 			let data = client
 				.upload(
@@ -219,6 +219,7 @@ pub fn oggsender(
 			room.send(content, Some(txn_id)).await.unwrap();
 		}
 	};
+	keep_alive(&tx); // Dumb if we exit due to an error elsewhere that'll take us down anyway
 	(process, tx)
 }
 

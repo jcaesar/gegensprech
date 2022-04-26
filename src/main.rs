@@ -140,13 +140,17 @@ async fn run(args: &Run) -> Result<()> {
 
 	tokio::select! {
 		() = sync => bail!("Synchronization exited"),
+		e = play => e?,
 		e = textsender => e?,
 		e = button.unwrap(), if button.is_some() => e?,
-		e = play => e?,
 		_ = ctrl_c => return Ok(()),
 		_ = term.recv() => return Ok(()),
 	};
 	bail!("No task should exit, let alone successfully");
+}
+
+fn keep_alive<T>(channel: &mpsc::Sender<T>) {
+	Box::leak(Box::new(channel.clone()));
 }
 
 #[tokio::main]

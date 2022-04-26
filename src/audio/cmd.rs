@@ -3,13 +3,16 @@ use anyhow::{Context, Result};
 use matrix_sdk::ruma::{events::room::message::AudioInfo, UInt};
 use signal_child::Signalable;
 use std::{
+	borrow::Cow,
 	io::{Read, Write},
 	mem,
+	os::unix::process::ExitStatusExt,
 	process::{Command, Stdio},
 	thread,
 	time::Instant,
 };
 use tokio::sync::oneshot;
+use tracing::debug;
 
 static CLIENT_NAME_ARG: &'static str = concat!("--client-name=", env!("CARGO_PKG_NAME"));
 
@@ -42,21 +45,29 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 	let stderr = read_pipe(recorder.stderr.take().unwrap());
 	cont.blocking_recv().ok();
 	recorder.interrupt().context("Stop subcommand")?;
-	match recorder.wait() {
-		Ok(ok) if ok.success() => {
-			let data = stdout.blocking_recv().unwrap();
-			let mut info: AudioInfo = AudioInfo::new();
-			info.duration = UInt::new(Instant::now().duration_since(start).as_secs());
-			info.mimetype = Some("media/ogg".to_owned());
-			info.size = UInt::new(data.len() as u64);
-			Ok(Rec { data, info })
-		}
-		Ok(_fail) => {
-			let stderr = &stderr.blocking_recv().unwrap();
-			let stderr = String::from_utf8_lossy(stderr);
-			anyhow::bail!("{}", stderr)
-		}
-		Err(e) => Err(e).context("Process exit waiting failure"),
+	let exited = recorder.wait().context("Process exit waiting failure")?;
+	debug!(
+		?exited,
+		success = exited.success(),
+		code = exited.code(),
+		signal = exited.signal(),
+		"pacat exited"
+	);
+	if exited.success() || exited.signal() == Some(1) {
+		let data = stdout.blocking_recv().unwrap();
+		let mut info: AudioInfo = AudioInfo::new();
+		info.duration = UInt::new(Instant::now().duration_since(start).as_secs());
+		info.mimetype = Some("media/ogg".to_owned());
+		info.size = UInt::new(data.len() as u64);
+		Ok(Rec { data, info })
+	} else {
+		let stderr = &stderr.blocking_recv().unwrap();
+		let stderr = String::from_utf8_lossy(stderr);
+		let msg = match exited.code() {
+			Some(code) => Cow::Owned(format!("pacat exited with code {}", code)),
+			None => "pacat exited".into(),
+		};
+		anyhow::bail!("{}: {}", msg, stderr)
 	}
 }
 

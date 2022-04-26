@@ -130,7 +130,7 @@ async fn run(args: &Run) -> Result<()> {
 
 	let incoming = mtx::recv_audio_messages(&client).await;
 	let play = audio::play(incoming);
-	let sync = client.sync(SyncSettings::default());
+	let sync = mtx::sync(&client);
 	let (textsender, textchannel) = mtx::oggsender(channel, client.clone());
 	let button = match args.hardware {
 		Hardware::Seeed2Mic => Some(17),
@@ -139,10 +139,10 @@ async fn run(args: &Run) -> Result<()> {
 	let button = button.map(|button| button::read(button, textchannel));
 
 	tokio::select! {
-		() = sync => bail!("Synchronization exited"),
-		e = play => e?,
-		e = textsender => e?,
-		e = button.unwrap(), if button.is_some() => e?,
+		e = sync => e.context("Matrix synchronization")?,
+		e = play => e.context("Audio player")?,
+		e = textsender => e.context("Audio sender")?,
+		e = button.unwrap(), if button.is_some() => e.context("Button")?,
 		_ = ctrl_c => return Ok(()),
 		_ = term.recv() => return Ok(()),
 	};

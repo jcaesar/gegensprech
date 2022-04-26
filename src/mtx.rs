@@ -276,3 +276,27 @@ pub async fn recv_audio_messages(
 		.await;
 	rx
 }
+
+#[tracing::instrument]
+pub async fn sync(client: &Client) -> Result<()> {
+	let ss = SyncSettings::new();
+	loop {
+		let ss = ss.clone().token(
+			client
+				.sync_token()
+				.await
+				.context("No token for syncing (should have been obtained in initial sync)")?,
+		);
+		let sync = client.sync_once(ss.clone()).await;
+		match sync {
+			Ok(sync_ok) => {
+				status::mtx(MtxStatus::Good);
+				trace!(?sync_ok);
+			}
+			Err(sync_error) => {
+				status::mtx(MtxStatus::Disconnected);
+				error!(?sync_error);
+			}
+		}
+	}
+}

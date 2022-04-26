@@ -49,7 +49,7 @@ mod led_color {
 	use smart_leds_trait::RGB8;
 
 	macro_rules! color {
-		($name:ident, $r:tt, $g:tt, $b:tt) => {
+		($name:ident, $r:expr, $g:expr, $b:expr) => {
 			pub static $name: RGB8 = RGB8::new($r, $g, $b);
 		};
 	}
@@ -57,6 +57,7 @@ mod led_color {
 	color!(OFF, 0, 0, 0);
 	color!(WEAK_WHITE, 10, 10, 10);
 	color!(YELLOW, H, H, 0);
+	color!(AMBER, H, H / 2, 0);
 	color!(PURPLE, H, 0, H);
 	color!(RED, H, 0, 0);
 	color!(GREEN, 0, H, 0);
@@ -97,7 +98,7 @@ impl Render for Seeed {
 			data[0] = match status.mtx_status {
 				MtxStatus::Starting => YELLOW,
 				MtxStatus::Good => WEAK_WHITE,
-				MtxStatus::Disconnected => YELLOW,
+				MtxStatus::Disconnected => AMBER,
 			};
 		} else {
 			data = [OFF; 3];

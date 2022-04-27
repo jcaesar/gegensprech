@@ -1,4 +1,3 @@
-use crate::status::SendStatus;
 use crate::*;
 use crate::{audio::Rec, status::MtxStatus};
 use matrix_sdk::{
@@ -192,10 +191,9 @@ pub fn oggsender(
 			)
 			.await;
 
-		status::send(SendStatus::Normal);
 		loop {
 			let Rec { data, info } = rx.recv().await.context("recorder sender")?;
-			status::send(SendStatus::Uploading);
+			let _sending_status = status::send();
 			let data = client
 				.upload(
 					&info

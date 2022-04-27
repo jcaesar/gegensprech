@@ -22,16 +22,10 @@ pub enum MtxStatus {
 	Disconnected,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum SendStatus {
-	Uploading,
-	WaitingForReceipt,
-	Normal,
-}
-
 #[derive(Debug)]
 struct Status {
-	send_status: SendStatus,
+	send_status: bool,
+	catchup_status: bool,
 	mtx_status: MtxStatus,
 	audio_status: AudioStatus,
 	exited: bool,
@@ -85,10 +79,10 @@ impl Render for Seeed {
 		use led_color::*;
 		let mut data = [RGB::<u8>::default(); 3];
 		if !status.exited {
-			data[2] = match status.send_status {
-				SendStatus::Uploading => PURPLE,
-				SendStatus::WaitingForReceipt => BLUE,
-				SendStatus::Normal => OFF,
+			data[2] = match (status.send_status, status.catchup_status) {
+				(true, _) => PURPLE,
+				(_, true) => BLUE,
+				(_, _) => OFF,
 			};
 			data[1] = match status.audio_status {
 				AudioStatus::Recording => RED,
@@ -115,7 +109,8 @@ static STATUS_INIT: &'static str = "Status indicator is initialized at start";
 impl Status {
 	fn initial() -> Status {
 		Status {
-			send_status: SendStatus::Normal,
+			send_status: false,
+			catchup_status: false,
 			mtx_status: MtxStatus::Starting,
 			audio_status: AudioStatus::Idle,
 			exited: false,
@@ -153,8 +148,11 @@ pub(crate) fn mtx(mtx: MtxStatus) {
 	status(|status| status.mtx_status = mtx);
 }
 
-pub(crate) fn send(send: SendStatus) {
-	status(|status| status.send_status = send);
+pub(crate) fn send() -> impl UndoOnDrop {
+	status(|status| status.send_status = true);
+	CallOnDrop(Some(move || {
+		status(|status| status.send_status = false);
+	}))
 }
 
 #[tracing::instrument]

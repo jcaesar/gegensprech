@@ -139,7 +139,7 @@ async fn run(args: &Run) -> Result<()> {
 	let button = button.map(|button| button::read(button, textchannel));
 
 	tokio::select! {
-		e = sync => e.context("Matrix synchronization")?,
+		() = sync => (),
 		e = play => e.context("Audio player")?,
 		e = textsender => e.context("Audio sender")?,
 		e = button.unwrap(), if button.is_some() => e.context("Button")?,

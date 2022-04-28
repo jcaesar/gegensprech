@@ -1,5 +1,4 @@
-use crate::*;
-use crate::{audio::Rec, status::MtxStatus};
+use crate::{audio::Rec, status::MtxStatus, *};
 use matrix_sdk::{
 	room::Room,
 	ruma::events::{
@@ -7,8 +6,14 @@ use matrix_sdk::{
 		SyncMessageEvent,
 	},
 };
-use std::io::Cursor;
-use tokio::sync::oneshot;
+use std::{
+	io::Cursor,
+	sync::{Arc, Mutex},
+};
+use tokio::{
+	sync::oneshot,
+	time::{sleep, sleep_until},
+};
 
 #[tracing::instrument]
 fn create_client(hs: &Url) -> Result<Client> {
@@ -184,12 +189,12 @@ pub fn oggsender(
 			room::message::{AudioMessageEventContent, MessageType},
 			AnyMessageEventContent,
 		};
-		client
-			.register_event_handler(
-				move |ev: SyncMessageEvent<MessageEventContent>, room: Room, client: Client| async move {
-				},
-			)
-			.await;
+		/*client
+		.register_event_handler(
+			move |ev: SyncMessageEvent<MessageEventContent>, room: Room, client: Client| async move {
+			},
+		)
+		.await;*/
 
 		loop {
 			let Rec { data, info } = rx.recv().await.context("recorder sender")?;
@@ -276,25 +281,31 @@ pub async fn recv_audio_messages(
 }
 
 #[tracing::instrument]
-pub async fn sync(client: &Client) -> Result<()> {
-	let ss = SyncSettings::new();
-	loop {
-		let ss = ss.clone().token(
-			client
-				.sync_token()
-				.await
-				.context("No token for syncing (should have been obtained in initial sync)")?,
-		);
-		let sync = client.sync_once(ss.clone()).await;
-		match sync {
-			Ok(sync_ok) => {
-				status::mtx(MtxStatus::Good);
-				trace!(?sync_ok);
-			}
-			Err(sync_error) => {
-				status::mtx(MtxStatus::Disconnected);
-				error!(?sync_error);
+pub async fn sync(client: &Client) {
+	let sto = Duration::from_secs(60);
+	let ss = SyncSettings::new().timeout(sto);
+	let last_sync = Arc::new(Mutex::new(Instant::now()));
+	let last_sync_read = last_sync.clone();
+	// sync_once doesn't fail because I haven't set a RequestConfig::retry_limit.
+	// Setting one has wider implications, so I'll just check the last sync time regularly.
+
+	tokio::spawn(async move {
+		let mut doubt = Instant::now();
+		loop {
+			sleep(Duration::from_secs(10)).await;
+			sleep_until(doubt.into()).await;
+			doubt = *last_sync_read.lock().unwrap() + sto * 3 / 2;
+			match Instant::now() < doubt {
+				true => status::mtx(MtxStatus::Good),
+				false => status::mtx(MtxStatus::Disconnected),
 			}
 		}
-	}
+	});
+
+	client
+		.sync_with_callback(ss, move |_| {
+			*last_sync.lock().unwrap() = Instant::now();
+			async { LoopCtrl::Continue }
+		})
+		.await;
 }

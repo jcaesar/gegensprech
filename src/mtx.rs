@@ -1,9 +1,11 @@
 use crate::{audio::Rec, status::MtxStatus, *};
 use matrix_sdk::{
+	instant::SystemTime,
 	room::Room,
 	ruma::events::{
+		receipt::{Receipt, ReceiptEventContent},
 		room::message::{MessageEventContent, MessageType},
-		SyncMessageEvent,
+		SyncEphemeralRoomEvent, SyncMessageEvent,
 	},
 };
 use std::{
@@ -172,15 +174,75 @@ pub async fn channel(args: &Run, client: &Client) -> Result<JoinedRoom> {
 			},
 		},
 	};
-	Ok(client
+	let c = client
 		.get_joined_room(&id)
-		.context("Not joined to a room")?)
+		.context("Not joined to a room")?;
+
+	Ok(c)
+}
+
+#[tracing::instrument(skip(client, room))]
+pub async fn remote_indicator(
+	room: JoinedRoom,
+	client: Client,
+	expect_caught_up_to: Arc<Mutex<Option<SystemTime>>>,
+) {
+	let here = room.room_id().clone();
+	client
+		.register_event_handler(
+			move |ev: SyncEphemeralRoomEvent<ReceiptEventContent>, room: Room, _client: Client| {
+				let here = here.clone();
+				let ecu = *expect_caught_up_to.lock().unwrap();
+				async move {
+					let ecu = match ecu {
+						Some(ecu) => ecu,
+						None => return,
+					};
+					if room.room_id() != &here {
+						return;
+					}
+					debug!(?ev);
+					let u = match room.joined_user_ids().await {
+						Ok(u) => u,
+						Err(error) => {
+							warn!(?error, "Failed to get users for status");
+							return;
+						}
+					};
+					for u in u {
+						let rr = room.user_read_receipt(&u).await;
+						trace!(?rr, ?u);
+						let ts = match rr {
+							Ok(Some((_, Receipt { ts: Some(ts), .. }))) => ts,
+							Ok(_) => continue,
+							Err(err) => {
+								warn!(?here, ?u, ?err, "Can't get read receipt");
+								continue;
+							}
+						};
+						// This smells like a leap second bug.
+						// TODO: Implement proper
+						if ts
+							.to_system_time()
+							.expect("Unreasonable UInt of milliseconds")
+							< ecu
+						{
+							status::caughtup(false);
+							return;
+						}
+					}
+					status::caughtup(true);
+				}
+			},
+		)
+		.await;
 }
 
 #[tracing::instrument(skip(client))]
 pub fn oggsender(
 	room: JoinedRoom,
 	client: Client,
+	expect_caught_up_to: Arc<Mutex<Option<SystemTime>>>,
 ) -> (impl Future<Output = Result<()>>, mpsc::Sender<Rec>) {
 	let (tx, mut rx) = mpsc::channel::<Rec>(4);
 
@@ -189,12 +251,6 @@ pub fn oggsender(
 			room::message::{AudioMessageEventContent, MessageType},
 			AnyMessageEventContent,
 		};
-		/*client
-		.register_event_handler(
-			move |ev: SyncMessageEvent<MessageEventContent>, room: Room, client: Client| async move {
-			},
-		)
-		.await;*/
 
 		loop {
 			let Rec { data, info } = rx.recv().await.context("recorder sender")?;
@@ -219,6 +275,8 @@ pub fn oggsender(
 			));
 
 			let txn_id = Uuid::new_v4();
+			status::caughtup(false);
+			*expect_caught_up_to.lock().unwrap() = Some(SystemTime::now());
 			room.send(content, Some(txn_id)).await.unwrap();
 		}
 	};

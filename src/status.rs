@@ -167,3 +167,7 @@ pub(crate) fn init_from_args(args: &Hardware) -> Result<impl UndoOnDrop> {
 	status(|_| ());
 	Ok(CallOnDrop(Some(|| status(|status| status.exited = true))))
 }
+
+pub(crate) fn caughtup(caughtup: bool) {
+	status(|status| status.catchup_status = !caughtup);
+}

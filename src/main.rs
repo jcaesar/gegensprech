@@ -14,11 +14,14 @@ use matrix_sdk::{
 	Client, ClientConfig, LoopCtrl, Session, SyncSettings,
 };
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::fs::File;
 use std::future::Future;
 use std::path::PathBuf;
 use std::process::exit;
+use std::{
+	fs,
+	sync::{Arc, Mutex},
+};
 use tokio::{
 	signal::unix::{signal, SignalKind},
 	sync::mpsc,
@@ -131,7 +134,9 @@ async fn run(args: &Run) -> Result<()> {
 	let incoming = mtx::recv_audio_messages(&client).await;
 	let play = audio::play(incoming);
 	let sync = mtx::sync(&client);
-	let (textsender, textchannel) = mtx::oggsender(channel, client.clone());
+	let expect_caught_up_to = Arc::new(Mutex::new(None));
+	mtx::remote_indicator(channel.clone(), client.clone(), expect_caught_up_to.clone()).await;
+	let (textsender, textchannel) = mtx::oggsender(channel, client.clone(), expect_caught_up_to);
 	let button = match args.hardware {
 		Hardware::Seeed2Mic => Some(17),
 		Hardware::SolderedCustom(SolderedCustom { button, .. }) => button,

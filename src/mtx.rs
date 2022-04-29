@@ -295,6 +295,9 @@ pub async fn recv_audio_messages(
 				let tx = tx.clone();
 				async move {
 					debug!(?ev, "received");
+					if Some(ev.sender) == client.user_id().await {
+						return;
+					}
 					let eid = ev.event_id;
 					if let MessageType::Audio(amc) = ev.content.msgtype {
 						info!(?amc, "received audio");

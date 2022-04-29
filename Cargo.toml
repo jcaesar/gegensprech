@@ -31,6 +31,7 @@ apa102-spi = "0.3.2"
 smart-leds-trait = "0.2.1"
 signal-child = "1.0.5"
 once_cell = "1.10.0"
+regex = "1.5.5"
 
 [features]
 audio-as-lib = ["libpulse-binding", "libpulse-simple-binding"]

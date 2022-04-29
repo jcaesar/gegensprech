@@ -8,6 +8,7 @@ use matrix_sdk::{
 		SyncEphemeralRoomEvent, SyncMessageEvent,
 	},
 };
+use regex::Regex;
 use std::{
 	io::Cursor,
 	sync::{Arc, Mutex},
@@ -190,7 +191,7 @@ pub async fn remote_indicator(
 	let here = room.room_id().clone();
 	client
 		.register_event_handler(
-			move |ev: SyncEphemeralRoomEvent<ReceiptEventContent>, room: Room, _client: Client| {
+			move |ev: SyncEphemeralRoomEvent<ReceiptEventContent>, room: Room, client: Client| {
 				let here = here.clone();
 				let ecu = *expect_caught_up_to.lock().unwrap();
 				async move {
@@ -209,7 +210,24 @@ pub async fn remote_indicator(
 							return;
 						}
 					};
+					let cond = room.topic().and_then(|topic| {
+						topic
+							.lines()
+							.filter_map(|l| l.strip_prefix("gegensprech-markers: "))
+							.next()
+							.map(Regex::new)
+					});
+					debug!(?cond, "marker user filtering");
+					let cond = cond
+						.and_then(|cond| cond.ok())
+						.unwrap_or(Regex::new("").unwrap());
 					for u in u {
+						if Some(&u) == client.user_id().await.as_ref() {
+							continue;
+						}
+						if !cond.is_match(u.as_str()) {
+							continue;
+						}
 						let rr = room.user_read_receipt(&u).await;
 						trace!(?rr, ?u);
 						let ts = match rr {
@@ -227,6 +245,7 @@ pub async fn remote_indicator(
 							.expect("Unreasonable UInt of milliseconds")
 							< ecu
 						{
+							debug!(?u, "Not caught up");
 							status::caughtup(false);
 							return;
 						}

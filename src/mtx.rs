@@ -221,7 +221,7 @@ pub async fn remote_indicator(
 							}
 						};
 						// This smells like a leap second bug.
-						// TODO: Implement proper
+						// TODO: Implement proper before or after based on timeline
 						if ts
 							.to_system_time()
 							.expect("Unreasonable UInt of milliseconds")

@@ -66,6 +66,7 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 			.collect::<Vec<_>>();
 		// Pulseaudio and pacat have a startup time. If the button is released before that is done…
 		// Might be nice to only flash the red recording indicator once we have our first samples.
+		// TODO: Make sure this doesn't cause an exit with error
 		anyhow::ensure!(data.len() > 500, "Short recording");
 		let data = ogg_opus::encode::<48000, 1>(&data).context("OGG Opus encode")?;
 		let mut info: AudioInfo = AudioInfo::new();

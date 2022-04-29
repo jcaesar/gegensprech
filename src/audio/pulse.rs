@@ -1,4 +1,3 @@
-use std::io::Cursor;
 use super::Rec;
 use anyhow::{Context, Result};
 use itertools::Itertools;
@@ -8,6 +7,7 @@ use libpulse_binding::{
 };
 use libpulse_simple_binding::Simple;
 use matrix_sdk::ruma::{events::room::message::AudioInfo, UInt};
+use std::io::Cursor;
 use tokio::sync::oneshot;
 
 const SAMPLE_RATE: u32 = 16000;
@@ -52,9 +52,11 @@ pub(crate) fn record(mut cont: oneshot::Receiver<()>) -> Result<Rec> {
 	Ok(Rec { info, data })
 }
 
-pub(crate) fn play(data: Vec<u8>) -> Result<()> {
-	let (data, meta) =
-		ogg_opus::decode::<_, 16000>(Cursor::new(data)).context("OGG Opus decode")?;
+pub(crate) fn play(data: Vec<u8>, mtyp: Option<String>) -> Result<()> {
+	let (data, meta) = ogg_opus::decode::<_, 16000>(Cursor::new(data)).context(format!(
+		"Decode {} as OGG Opus",
+		mtyp.as_deref().unwrap_or("MIME unknown")
+	))?;
 	let spec = Spec {
 		format: Format::S16NE,
 		channels: meta.channels as u8,

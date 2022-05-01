@@ -1,0 +1,71 @@
+wall=1.5;
+spiel=0.5;
+$fn=180;
+
+module duplicate(vec=[1,0,0]) {
+	children();
+	mirror(vec) children();
+}
+
+b=65;
+t=24;
+h=30;
+
+vmsd=3;
+vcam=1;
+vusb=1;
+vklink=2;
+hklink=6;
+pcb=1.6;
+
+dklemm=5;
+
+ledb=10;
+ledh=12;
+ledt=4;
+ledd=1.8;
+leds=1;
+
+btnh = 12;
+btnw = 15.5;
+btns = 6;
+
+difference() {
+	translate([-b / 2 - vmsd - wall, -wall, -wall])
+		cube([b + vmsd + vcam + 2 * wall, t + 2 * wall, h + wall]);
+	union() {
+		difference() {
+			translate([-b / 2 - vmsd, 0, 0])
+				cube([b + vmsd + vcam, t, h + 1]);
+			duplicate() {
+				translate([b / 2 - dklemm, t - hklink, -1])
+					cube([dklemm + vmsd + 1, hklink + 1, dklemm + 1]);
+				translate([b / 2 - wall, t - hklink - pcb - spiel - wall, -1])
+					cube([wall + vmsd + 1, wall, h + 2]);
+				translate([b / 2, t - hklink - 2 * spiel - wall, -1])
+					cube([wall + vmsd + 1, pcb + 2 * spiel, h + 2]);
+
+			}
+			translate([-ledb / 2, t - ledt, 0])
+				cube([ledb, ledt + 1, ledh + ledd * 1.5]);
+		}
+	}
+	for(v = [-1, 0, 1]) {
+		o = (leds + ledd) * v;
+		translate([o, - 1 + t - ledt, ledh])
+			rotate([-90, 0, 0])
+				cylinder(h = ledt + wall + 2, r = ledd / 2);
+	}
+	translate([-btnw, t + wall / 2, btnh / 2 + 2 * wall])
+		difference() {
+			cube([btns + 2 * wall, 2 * wall, btns + 2 * wall + btnh / 2], center = true);
+			translate([0, 0, - 2 * wall])
+				cube([btns + wall, 2 * wall, btns +  wall + btnh / 2], center = true);
+		}
+}
+
+translate([-btnw, t + wall / 2, btnh])
+	hull() {
+		cube([btns, 2 *  wall, btns], center = true);
+		cube([btns + wall, wall, btns + wall], center = true);
+	}

@@ -7,6 +7,14 @@ module duplicate(vec=[1,0,0]) {
 	mirror(vec) children();
 }
 
+module shearAlongZ(p) {
+	multmatrix([
+		[1,0,p.x/p.z,0],
+		[0,1,p.y/p.z,0],
+		[0,0,1,0]
+	]) children();
+}
+
 b=65;
 t=24;
 h=30;
@@ -19,6 +27,7 @@ hklink=6;
 pcb=1.6;
 
 dklemm=5;
+seedpower=12;
 
 ledb=10;
 ledh=12;
@@ -27,41 +36,64 @@ ledd=1.8;
 leds=1;
 
 btnh = 12;
-btnw = 15.5;
+btnw = 15.5 + 1.4;
 btns = 6;
+
+michh = 2;
+mich = 10;
+micb = 2;
+mict = 1.2;
 
 difference() {
 	translate([-b / 2 - vmsd - wall, -wall, -wall])
 		cube([b + vmsd + vcam + 2 * wall, t + 2 * wall, h + wall]);
-	union() {
-		difference() {
-			translate([-b / 2 - vmsd, 0, 0])
-				cube([b + vmsd + vcam, t, h + 1]);
-			duplicate() {
-				translate([b / 2 - dklemm, t - hklink, -1])
-					cube([dklemm + vmsd + 1, hklink + 1, dklemm + 1]);
-				translate([b / 2 - wall, t - hklink - pcb - spiel - wall, -1])
-					cube([wall + vmsd + 1, wall, h + 2]);
-				translate([b / 2, t - hklink - 2 * spiel - wall, -1])
-					cube([wall + vmsd + 1, pcb + 2 * spiel, h + 2]);
-
-			}
-			translate([-ledb / 2, t - ledt, 0])
-				cube([ledb, ledt + 1, ledh + ledd * 1.5]);
+	difference() {
+		translate([-b / 2 - vmsd - spiel, 0, 0])
+			cube([b + vmsd + vcam + 2 * spiel, t, h + 1]);
+		duplicate() {
+			translate([b / 2 - dklemm, t - hklink, -1])
+				cube([dklemm + vmsd + 1, hklink + 1, dklemm + 1]);
+			translate([b / 2 - wall, t - hklink - pcb - 2 * spiel - wall, -1])
+				cube([wall + vmsd + 1, wall, h + 2]);
 		}
+		translate([b / 2 + spiel, t - hklink - 2 * spiel - wall - 1, -1])
+			cube([wall + vmsd + 1, pcb + 2 * spiel + 1, h + 2]);
+		mirror([1, 0, 0]) {
+			translate([b / 2 + spiel, t - hklink - 2 * spiel - wall - 1, -1])
+				cube([wall + vmsd + 1, pcb + 2 * spiel + 1, seedpower]);
+			translate([b / 2 + spiel, t - hklink - 2 * spiel - wall - 1, -1])
+				cube([wall + vmsd + 1, pcb * 0.75 + 1, h + 2]);
+		}
+		translate([-ledb / 2, t - ledt, 0])
+			cube([ledb, ledt + 1, ledh + ledd * 1.5]);
+		duplicate() {
+			hull()
+				for(v = [-10, 0, 10])
+					translate([b / 2 - micb / 2 + abs(v) * micb, t - hklink + mict, ledh + v * micb])
+						rotate([-90, 0, 0])
+							cylinder(h = hklink + wall + 1, r = micb / 2 + wall);
+		}
+		
 	}
 	for(v = [-1, 0, 1]) {
 		o = (leds + ledd) * v;
-		translate([o, - 1 + t - ledt, ledh])
+		translate([o, - 0.1 + t - ledt, ledh])
 			rotate([-90, 0, 0])
-				cylinder(h = ledt + wall + 2, r = ledd / 2);
+				cylinder(h = ledt + wall + 1.1, r1 = (ledd + leds) / 2, r2 = 0);
 	}
-	translate([-btnw, t + wall / 2, btnh / 2 + 2 * wall])
+	translate([-btnw, t + wall / 2, btnh / 2 + btns / 4 + wall])
 		difference() {
-			cube([btns + 2 * wall, 2 * wall, btns + 2 * wall + btnh / 2], center = true);
+			cube([btns + 2 * wall, 2 * wall, btnh  + btns / 2 + 2 * wall], center = true);
 			translate([0, 0, - 2 * wall])
-				cube([btns + wall, 2 * wall, btns +  wall + btnh / 2], center = true);
+				cube([btns + wall, 2 * wall, btns / 2 +  wall + btnh], center = true);
 		}
+	duplicate()
+		hull()
+			for(v = [-10, 0, 10])
+				translate([b / 2 - micb / 2 + abs(v) * micb, t - hklink + mict - 1, ledh + v * micb])
+					rotate([-90, -90, 0])
+						shearAlongZ([0,2,5]) 
+							cylinder(h = ledt + wall + 2.1, r = micb / 2);
 }
 
 translate([-btnw, t + wall / 2, btnh])

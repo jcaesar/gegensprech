@@ -22,6 +22,9 @@ h=30;
 vmsd=3;
 vcam=1;
 vusb=1;
+usbb=6;
+usbt=3;
+usbh=8;
 vklink=2;
 hklink=6;
 pcb=1.6;
@@ -40,8 +43,8 @@ btnw = 15.5 + 1.4;
 btns = 6;
 
 michh = 2;
-mich = 10;
-micb = 2;
+mich = 10 - 1.5;
+micb = 4;
 mict = 1.2;
 
 difference() {
@@ -60,26 +63,23 @@ difference() {
 			cube([wall + vmsd + 1, pcb + 2 * spiel + 1, h + 2]);
 		mirror([1, 0, 0]) {
 			translate([b / 2 + spiel, t - hklink - 2 * spiel - wall - 1, -1])
-				cube([wall + vmsd + 1, pcb + 2 * spiel + 1, seedpower]);
+				cube([wall + vmsd + 1, pcb + 2 * spiel + 1, dklemm + 1]);
 			translate([b / 2 + spiel, t - hklink - 2 * spiel - wall - 1, -1])
 				cube([wall + vmsd + 1, pcb * 0.75 + 1, h + 2]);
 		}
-		translate([-ledb / 2, t - ledt, 0])
-			cube([ledb, ledt + 1, ledh + ledd * 1.5]);
 		duplicate() {
 			hull()
 				for(v = [-10, 0, 10])
-					translate([b / 2 - micb / 2 + abs(v) * micb, t - hklink + mict, ledh + v * micb])
+					translate([b / 2 - micb / 2 + abs(v) * micb * 2, t - hklink + mict, mich + v * micb])
 						rotate([-90, 0, 0])
-							cylinder(h = hklink + wall + 1, r = micb / 2 + wall);
+							cylinder(h = hklink + wall + 1, r = micb / 4 + wall);
 		}
-		
-	}
-	for(v = [-1, 0, 1]) {
-		o = (leds + ledd) * v;
-		translate([o, - 0.1 + t - ledt, ledh])
-			rotate([-90, 0, 0])
-				cylinder(h = ledt + wall + 1.1, r1 = (ledd + leds) / 2, r2 = 0);
+		for(v = [-1, 0, 1])
+			translate([(leds + ledd) * v - ledd / 2, t - ledt, ledh - ledd / 2])
+				hull()
+					for(h = [-1, 0, 1])
+						translate([0, abs(h) * ledt, h * ledt * 1.2])
+							cube([ledd, ledt + wall / 2, ledd]);
 	}
 	translate([-btnw, t + wall / 2, btnh / 2 + btns / 4 + wall])
 		difference() {
@@ -90,14 +90,26 @@ difference() {
 	duplicate()
 		hull()
 			for(v = [-10, 0, 10])
-				translate([b / 2 - micb / 2 + abs(v) * micb, t - hklink + mict - 1, ledh + v * micb])
+				translate([b / 2 - micb / 2 + abs(v) * micb * 2, t - hklink + mict - 1, mich + v * micb])
 					rotate([-90, -90, 0])
 						shearAlongZ([0,2,5]) 
-							cylinder(h = ledt + wall + 2.1, r = micb / 2);
+							cylinder(h = ledt + wall + 2.1, r = micb / 4);
+	
+	mirror([1, 0, 0])
+		translate([b / 2 - usbb, t - hklink - 2 * spiel - 1 + pcb, seedpower])
+			minkowski() {
+				cube([usbb, usbt, usbh]);
+				sphere(r = spiel / 2);
+			}
 }
 
 translate([-btnw, t + wall / 2, btnh])
 	hull() {
-		cube([btns, 2 *  wall, btns], center = true);
+		cube([btns, 2 *  wall + 1, btns], center = true);
 		cube([btns + wall, wall, btns + wall], center = true);
 	}
+		
+
+%mirror([1, 0, 0])
+	translate([b / 2 - usbb, t - hklink - 2 * spiel - 1 + pcb, seedpower])
+		cube([usbb, usbt, usbh]);

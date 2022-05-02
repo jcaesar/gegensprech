@@ -9,6 +9,7 @@ use rppal::system::DeviceInfo;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::mpsc::Sender;
+use tracing::trace;
 
 use crate::audio;
 
@@ -57,7 +58,7 @@ impl EdgeRaw {
 			None => self.pin.poll_interrupt(false, None)?,
 		}
 		.is_some();
-		tracing::trace!(button_edge = ?ret);
+		trace!(button_edge = ?ret);
 		Ok(ret)
 	}
 }
@@ -76,7 +77,7 @@ impl EdgeDeb {
 		let mut pf = Instant::now();
 		loop {
 			let level = self.raw.current();
-			tracing::trace!(?level, ?self.lrs);
+			trace!(?level, ?self.lrs);
 			if level != self.lrs {
 				self.lrs = level;
 				tracing::debug!(?level, ?pf, "edge");
@@ -91,7 +92,7 @@ impl EdgeDeb {
 			loop {
 				let timeout = Instant::now() + self.deb;
 				let edge = self.raw.next(Some(timeout))?;
-				tracing::trace!(?edge, ?timeout);
+				trace!(?edge, ?timeout);
 				match edge {
 					true => continue,
 					false => break,
@@ -113,13 +114,13 @@ impl Button {
 		loop {
 			match self.longdown {
 				Some((false, down)) if down + self.lpd < Instant::now() => {
-					tracing::trace!("got long");
+					trace!("got long");
 					self.longdown = Some((true, down));
 					return Ok(Some(Press::LongStart(down)));
 				}
 				Some((false, down)) => {
 					let (edge, level, _time) = self.edge.next(Some(down + self.lpd))?;
-					tracing::trace!(?edge, ?level, "still short");
+					trace!(?edge, ?level, "still short");
 					match edge {
 						PinPoll::Timeout => {
 							self.longdown = Some((true, down));
@@ -134,7 +135,7 @@ impl Button {
 				}
 				Some(_) | None => {
 					let (edge, level, time) = self.edge.next(timeout)?;
-					tracing::trace!(?edge, ?level, ?self.longdown, "new edge");
+					trace!(?edge, ?level, ?self.longdown, "new edge");
 					match edge {
 						PinPoll::Timeout => return Ok(None),
 						PinPoll::Edge => match self.longdown {
@@ -162,32 +163,19 @@ pub async fn read(button: u8, messages: Sender<audio::Rec>) -> Result<()> {
 	let mut button = Button::new(EdgeDeb::new(Gpio::new()?.get(button)?)?);
 	tokio::task::spawn_blocking(move || -> Result<()> {
 		loop {
-			let mut timeout = false;
-			let mut recording = None;
-			loop {
-				let et = button.next(match timeout {
-					true => Some(Instant::now() + Duration::from_secs(20)),
-					false => None,
-				})?;
-				tracing::trace!(?et);
-				match et {
-					Some(Press::Short(_)) => {
-						timeout = false;
-						recording = None;
-					}
-					Some(Press::LongStart(_)) => {
-						timeout = true;
-						recording = Some(audio::RecProc::start());
-					}
-					Some(Press::LongEnd(_, _)) => break,
-					None => break,
-				};
-			}
-			// TODO: loop structure..
-			if let Some(recording) = recording {
-				tracing::debug!("send");
-				messages.blocking_send(block_on(recording.finish())?)?;
-			}
+			let et = button.next(None)?;
+			trace!(?et);
+			match et {
+				Some(Press::Short(_)) => {}
+				Some(Press::LongStart(_)) => {
+					let recording = audio::RecProc::start();
+					tracing::debug!("send");
+					let et = button.next(Some(Instant::now() + Duration::from_secs(20)));
+					trace!(?et, "recording, waiting for LongEnd");
+					messages.blocking_send(block_on(recording.finish())?)?;
+				}
+				_ => unreachable!("Waiting for button down, got something else"),
+			};
 		}
 	})
 	.await??;

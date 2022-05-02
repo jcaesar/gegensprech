@@ -1,4 +1,6 @@
 use crate::audio::Rec;
+use crate::status;
+use crate::status::AudioStatus;
 use anyhow::{Context, Result};
 use itertools::Itertools;
 use matrix_sdk::ruma::{events::room::message::AudioInfo, UInt};
@@ -27,6 +29,22 @@ fn read_pipe(mut pipe: impl Read + Send + 'static) -> oneshot::Receiver<Vec<u8>>
 	receiver
 }
 
+fn record_read(mut pipe: impl Read + Send + 'static) -> oneshot::Receiver<Result<Vec<u8>>> {
+	let (sender, receiver) = oneshot::channel();
+	thread::spawn(move || {
+		sender
+			.send((|| {
+				let mut buf = vec![0; 48];
+				pipe.read_exact(&mut buf[..])?;
+				let _guard = status::audio(AudioStatus::Recording);
+				pipe.read_to_end(&mut buf)?;
+				Ok(buf)
+			})())
+			.ok();
+	});
+	receiver
+}
+
 #[tracing::instrument(skip(cont))]
 pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 	let mut recorder = Command::new("pacat")
@@ -45,7 +63,7 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 		.spawn()
 		.context("$ pacat --record")?;
 	let start = Instant::now();
-	let stdout = read_pipe(recorder.stdout.take().unwrap());
+	let stdout = record_read(recorder.stdout.take().unwrap());
 	let stderr = read_pipe(recorder.stderr.take().unwrap());
 	cont.blocking_recv().ok();
 	recorder.interrupt().context("Stop subcommand")?;
@@ -58,14 +76,16 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 		"pacat exited"
 	);
 	if exited.success() || exited.signal() == Some(1) {
-		let data = stdout.blocking_recv().unwrap();
+		let data = stdout
+			.blocking_recv()
+			.unwrap()
+			.context("read pacat --record sdtout")?;
 		let data = data
 			.into_iter()
 			.tuples()
 			.map(|(a, b)| i16::from_le_bytes([a, b]))
 			.collect::<Vec<_>>();
 		// Pulseaudio and pacat have a startup time. If the button is released before that is done…
-		// Might be nice to only flash the red recording indicator once we have our first samples.
 		// TODO: Make sure this doesn't cause an exit with error
 		anyhow::ensure!(data.len() > 500, "Short recording");
 		let data = ogg_opus::encode::<48000, 1>(&data).context("OGG Opus encode")?;
@@ -112,6 +132,7 @@ pub(crate) fn play(data: Vec<u8>, mtyp: Option<String>) -> Result<()> {
 	let stdout = read_pipe(player.stdout.take().unwrap());
 	let stderr = read_pipe(player.stderr.take().unwrap());
 	let mut stdin = player.stdin.take().unwrap();
+	let _guard = status::audio(AudioStatus::Playing);
 	let written = stdin.write_all(&data);
 	if written.is_err() {
 		warn!(?written, "pipe write error, kill pacat");

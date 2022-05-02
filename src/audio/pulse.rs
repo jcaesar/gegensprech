@@ -1,4 +1,6 @@
 use super::Rec;
+use crate::status;
+use crate::status::AudioStatus;
 use anyhow::{Context, Result};
 use itertools::Itertools;
 use libpulse_binding::{
@@ -29,6 +31,7 @@ pub(crate) fn record(mut cont: oneshot::Receiver<()>) -> Result<Rec> {
 	)
 	.context("Pulseaudio open")?;
 	let mut recorded = Vec::with_capacity(SAMPLE_RATE as usize * 2);
+	let mut led_guard = None;
 	loop {
 		let mut block = [0; 2048];
 		input.read(&mut block)?;
@@ -40,6 +43,7 @@ pub(crate) fn record(mut cont: oneshot::Receiver<()>) -> Result<Rec> {
 			Ok(()) => break,
 			Err(e) => Err(e).context("aborted")?,
 		}
+		led_guard.get_or_insert_with(|| status::audio(AudioStatus::Recording));
 	}
 	let data = ogg_opus::encode::<SAMPLE_RATE, 1>(&recorded[..]).context("OGG Opus encode")?;
 	let info = {
@@ -74,6 +78,7 @@ pub(crate) fn play(data: Vec<u8>, mtyp: Option<String>) -> Result<()> {
 		None,
 	)
 	.context("Pulseaudio open")?;
+	let _guard = status::audio(AudioStatus::Playing);
 	for chunk in data.chunks(2048) {
 		let block = chunk
 			.iter()

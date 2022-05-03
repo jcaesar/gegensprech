@@ -6,12 +6,16 @@ use rppal::gpio::Level;
 use rppal::gpio::Pin;
 use rppal::gpio::Trigger;
 use rppal::system::DeviceInfo;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::mpsc::Sender;
+use tracing::debug;
 use tracing::trace;
 
 use crate::audio;
+use crate::cmd::Morse;
 
 #[derive(Debug, PartialEq, Eq)]
 enum PinPoll {
@@ -157,17 +161,30 @@ impl Button {
 	}
 }
 
-#[tracing::instrument(skip(messages))]
-pub async fn read(button: u8, messages: Sender<audio::Rec>) -> Result<()> {
+#[tracing::instrument(skip(messages, cmds, running))]
+pub async fn read(
+	button: u8,
+	messages: Sender<audio::Rec>,
+	cmds: crate::cmd::ButtonCommands,
+	running: Arc<Mutex<Option<crate::cmd::Running>>>,
+) -> Result<()> {
 	tracing::info!(raspi=?DeviceInfo::new());
 	let mut button = Button::new(EdgeDeb::new(Gpio::new()?.get(button)?)?);
 	tokio::task::spawn_blocking(move || -> Result<()> {
 		loop {
 			let et = button.next(None)?;
 			trace!(?et);
+			let mut running = running.lock().unwrap();
+			if let Some(running) = running.take() {
+				running.terminate();
+			}
 			match et {
-				Some(Press::Short(_)) => {}
+				Some(Press::Short(_)) => {
+					let code = parse_morse(&mut button)?;
+					*running = cmds.exec(code);
+				}
 				Some(Press::LongStart(_)) => {
+					drop(running);
 					let recording = audio::RecProc::start();
 					tracing::debug!("send");
 					let et = button.next(Some(Instant::now() + Duration::from_secs(20)));
@@ -180,4 +197,33 @@ pub async fn read(button: u8, messages: Sender<audio::Rec>) -> Result<()> {
 	})
 	.await??;
 	Ok(())
+}
+
+#[tracing::instrument(skip(button))]
+fn parse_morse(button: &mut Button) -> Result<Vec<Morse>> {
+	let mut morse = vec![Morse::Short];
+	let mut timeout = true;
+	loop {
+		let et = button.next(match timeout {
+			true => Some(Instant::now() + Duration::from_secs(2)),
+			false => None,
+		})?;
+		morse.push(match et {
+			Some(Press::Short(_)) => {
+				timeout = true;
+				Morse::Short
+			}
+			Some(Press::LongStart(_)) => {
+				timeout = false;
+				Morse::Long
+			}
+			Some(Press::LongEnd(_, _)) => {
+				timeout = true;
+				continue;
+			}
+			None => break,
+		});
+	}
+	debug!(?morse, "Morsed command");
+	Ok(morse)
 }

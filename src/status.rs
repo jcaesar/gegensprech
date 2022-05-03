@@ -6,7 +6,10 @@ use smart_leds_trait::{SmartLedsWrite, RGB};
 use std::sync::Mutex;
 use tracing::error;
 
-use crate::Hardware;
+use crate::{
+	misc::{CallOnDrop, UndoOnDrop},
+	Hardware,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum AudioStatus {
@@ -120,15 +123,6 @@ impl Status {
 
 // For once I tried designing something that isn't based on a tokio proc and channels
 // Oh what have I gotten myself into...
-pub trait UndoOnDrop {}
-struct CallOnDrop<T: FnOnce()>(Option<T>);
-impl<T: FnOnce()> UndoOnDrop for CallOnDrop<T> {}
-
-impl<T: FnOnce()> Drop for CallOnDrop<T> {
-	fn drop(&mut self) {
-		self.0.take().unwrap()();
-	}
-}
 
 fn status(mut mutate: impl FnMut(&mut Status)) {
 	let mut lock = STATUS.get().expect(STATUS_INIT).0.lock().unwrap();
@@ -139,9 +133,7 @@ fn status(mut mutate: impl FnMut(&mut Status)) {
 
 pub(crate) fn audio(audio: AudioStatus) -> impl UndoOnDrop {
 	status(|status| status.audio_status = audio);
-	CallOnDrop(Some(move || {
-		status(|status| status.audio_status = AudioStatus::Idle)
-	}))
+	CallOnDrop::call(move || status(|status| status.audio_status = AudioStatus::Idle))
 }
 
 pub(crate) fn mtx(mtx: MtxStatus) {
@@ -150,9 +142,9 @@ pub(crate) fn mtx(mtx: MtxStatus) {
 
 pub(crate) fn send() -> impl UndoOnDrop {
 	status(|status| status.send_status = true);
-	CallOnDrop(Some(move || {
+	CallOnDrop::call(move || {
 		status(|status| status.send_status = false);
-	}))
+	})
 }
 
 #[tracing::instrument]
@@ -168,7 +160,7 @@ pub(crate) fn init_from_args(args: &Hardware) -> Result<impl UndoOnDrop> {
 		error!("Can init status LEDs only once");
 	}
 	status(|_| ());
-	Ok(CallOnDrop(Some(|| status(|status| status.exited = true))))
+	Ok(CallOnDrop::call(|| status(|status| status.exited = true)))
 }
 
 pub(crate) fn caughtup(caughtup: bool) {

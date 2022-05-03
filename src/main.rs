@@ -1,5 +1,7 @@
 mod audio;
 mod button;
+mod cmd;
+pub mod misc;
 mod mtx;
 mod status;
 use anyhow::{bail, Context, Result};
@@ -15,7 +17,6 @@ use matrix_sdk::{
 };
 use serde::{Deserialize, Serialize};
 use std::future::Future;
-use std::path::PathBuf;
 use std::process::exit;
 use std::{
 	fs,
@@ -95,9 +96,6 @@ pub struct Run {
 	/// Join channel (wait for invite if not provided)
 	#[clap(short, long)]
 	channel: Option<RoomId>,
-	/// Custom button commands definition file
-	#[clap(short, long)]
-	cmds: Option<PathBuf>,
 	/// Hardware
 	#[clap(subcommand)]
 	hardware: Hardware,
@@ -120,15 +118,17 @@ struct SolderedCustom {
 }
 
 #[tracing::instrument(skip(args))]
-async fn run(args: &Run, session_path: &Path) -> Result<()> {
+async fn run(args: &Run, config_dir: &Path) -> Result<()> {
 	let ctrl_c = tokio::signal::ctrl_c();
 	let mut term = signal(SignalKind::terminate())?;
 	let _leds = status::init_from_args(&args.hardware).context("Status LED init")?;
-	let client = mtx::start(session_path).await.context("Matrix startup")?;
+	let cmds = cmd::ButtonCommands::load(config_dir)?;
+	let client = mtx::start(config_dir).await.context("Matrix startup")?;
 	let channel = mtx::channel(args, &client).await.context("Join channel")?;
 
 	let incoming = mtx::recv_audio_messages(&client).await;
-	let play = audio::play(incoming);
+	let running_cmd = Arc::new(Mutex::new(None));
+	let play = audio::play(incoming, running_cmd.clone());
 	let sync = mtx::sync(&client);
 	let expect_caught_up_to = Arc::new(Mutex::new(None));
 	mtx::remote_indicator(channel.clone(), client.clone(), expect_caught_up_to.clone()).await;
@@ -137,7 +137,7 @@ async fn run(args: &Run, session_path: &Path) -> Result<()> {
 		Hardware::Seeed2Mic => Some(17),
 		Hardware::SolderedCustom(SolderedCustom { button, .. }) => button,
 	};
-	let button = button.map(|button| button::read(button, textchannel));
+	let button = button.map(|button| button::read(button, textchannel, cmds, running_cmd));
 
 	tokio::select! {
 		() = sync => (),
@@ -150,23 +150,19 @@ async fn run(args: &Run, session_path: &Path) -> Result<()> {
 	bail!("No task should exit, let alone successfully");
 }
 
-fn keep_alive<T>(channel: &mpsc::Sender<T>) {
-	Box::leak(Box::new(channel.clone()));
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
 	tracing_subscriber::fmt::init();
-	let cfgdir: ProjectDirs = ProjectDirs::from("de", "liftm", env!("CARGO_CRATE_NAME"))
+	let config_dir = ProjectDirs::from("de", "liftm", env!("CARGO_CRATE_NAME"))
 		.expect("Can't determine settings directory");
-	let session_path: PathBuf = cfgdir.config_dir().join("session.json");
+	let config_dir = config_dir.config_dir();
 	let opts: Opts = clap::Parser::parse();
 	debug!("sup");
-	debug!(cfg=?session_path, opts=?opts, "init");
-	fs::create_dir_all(session_path.parent().unwrap()).context("Config dir must exist")?;
+	debug!(cfg=?config_dir, opts=?opts, "init");
+	fs::create_dir_all(config_dir).context("Config dir must exist")?;
 	match &opts {
-		Opts::Login(args) => mtx::login(args, &session_path).await,
-		Opts::Run(args) => run(args, &session_path).await,
+		Opts::Login(args) => mtx::login(args, config_dir).await,
+		Opts::Run(args) => run(args, config_dir).await,
 	}?;
 	exit(0);
 }

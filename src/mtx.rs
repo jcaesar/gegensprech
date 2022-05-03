@@ -1,4 +1,4 @@
-use crate::{audio::Rec, status::MtxStatus, *};
+use crate::{audio::Rec, misc::keep_alive, status::MtxStatus, *};
 use matrix_sdk::{
 	instant::SystemTime,
 	room::Room,
@@ -19,6 +19,8 @@ use tokio::{
 	time::{sleep, sleep_until},
 };
 
+static SESSION_PATH: &str = "session.json";
+
 #[tracing::instrument]
 fn create_client(hs: &Url) -> Result<Client> {
 	let client_config = ClientConfig::default().user_agent(&format!(
@@ -32,7 +34,8 @@ fn create_client(hs: &Url) -> Result<Client> {
 }
 
 #[tracing::instrument]
-pub async fn login(args: &Login, session_path: &Path) -> Result<()> {
+pub async fn login(args: &Login, config_dir: &Path) -> Result<()> {
+	let session_path = config_dir.join(SESSION_PATH);
 	anyhow::ensure!(
 		args.overwrite || !session_path.exists(),
 		"{:?} exists",
@@ -83,7 +86,8 @@ pub async fn login(args: &Login, session_path: &Path) -> Result<()> {
 }
 
 #[tracing::instrument]
-pub async fn start(session_path: &Path) -> Result<Client> {
+pub async fn start(config_dir: &Path) -> Result<Client> {
+	let session_path = config_dir.join(SESSION_PATH);
 	anyhow::ensure!(
 		session_path.exists(),
 		"Session data does not exist, please login first."

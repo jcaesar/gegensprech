@@ -5,7 +5,7 @@ mod pulse;
 use anyhow::{Context, Result};
 use matrix_sdk::ruma::events::room::message::AudioInfo;
 use once_cell::sync::Lazy;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio::{
 	sync::{mpsc, oneshot},
 	task::{spawn_blocking, JoinHandle},
@@ -48,19 +48,20 @@ impl RecProc {
 	#[tracing::instrument(skip(self))]
 	pub async fn finish(self) -> Result<Rec> {
 		self.done.send(()).ok();
-		self
-			.proc
+		self.proc
 			.await
 			.context("Recording spawn error")?
 			.context("Recording error")
 	}
 }
 
-#[tracing::instrument(skip(incoming))]
+#[tracing::instrument(skip(incoming, background_cmd))]
 pub async fn play(
 	mut incoming: mpsc::Receiver<(Vec<u8>, Option<String>, oneshot::Sender<()>)>,
+	background_cmd: Arc<Mutex<Option<crate::cmd::Running>>>,
 ) -> Result<()> {
 	loop {
+		let background_cmd = background_cmd.clone();
 		let data = incoming.recv().await;
 		let data = match data {
 			Some(data) => data,
@@ -68,6 +69,10 @@ pub async fn play(
 		};
 		let (data, mtyp, played) = data;
 		let proc = spawn_blocking(move || -> Result<_> {
+			let mut background_cmd = background_cmd.lock().unwrap();
+			if let Some(background_cmd) = background_cmd.take() {
+				background_cmd.terminate();
+			}
 			let _guard = MUTEX.lock().unwrap();
 			#[cfg(feature = "audio-as-lib")]
 			pulse::play(data, mtyp)?;

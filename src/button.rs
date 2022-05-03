@@ -16,6 +16,7 @@ use tracing::trace;
 
 use crate::audio;
 use crate::cmd::Morse;
+use crate::cmd::MorseWord;
 
 #[derive(Debug, PartialEq, Eq)]
 enum PinPoll {
@@ -200,7 +201,7 @@ pub async fn read(
 }
 
 #[tracing::instrument(skip(button))]
-fn parse_morse(button: &mut Button) -> Result<Vec<Morse>> {
+fn parse_morse(button: &mut Button) -> Result<MorseWord> {
 	let mut morse = vec![Morse::Short];
 	let mut timeout = true;
 	loop {
@@ -224,6 +225,7 @@ fn parse_morse(button: &mut Button) -> Result<Vec<Morse>> {
 			None => break,
 		});
 	}
+	let morse = MorseWord(morse);
 	debug!(?morse, "Morsed command");
 	Ok(morse)
 }

@@ -4,6 +4,7 @@ use signal_child::Signalable;
 use std::{
 	borrow::Cow,
 	collections::HashMap,
+	fmt::Debug,
 	fs::read,
 	path::Path,
 	process::{self, Child, Stdio},
@@ -15,14 +16,13 @@ use tracing::{debug, warn};
 static MORSE_CMDS: &str = "cmds.yaml";
 
 #[derive(Deserialize, Debug, Hash, PartialEq, Eq)]
-pub(crate) enum Morse {
+pub enum Morse {
 	Long,
 	Short,
 }
 
 impl TryFrom<char> for Morse {
 	type Error = anyhow::Error;
-
 	fn try_from(value: char) -> Result<Self, Self::Error> {
 		Ok(match value {
 			'_' | '-' | '—' | 'ー' => Morse::Long,
@@ -32,15 +32,14 @@ impl TryFrom<char> for Morse {
 	}
 }
 
-#[derive(Deserialize, Debug, PartialEq, Eq, Hash)]
+#[derive(Deserialize, PartialEq, Eq, Hash)]
 #[serde(try_from = "Cow<str>")]
-struct CmdSpec(Vec<Morse>);
+pub struct MorseWord(pub Vec<Morse>);
 
-impl TryFrom<Cow<'_, str>> for CmdSpec {
+impl TryFrom<Cow<'_, str>> for MorseWord {
 	type Error = anyhow::Error;
-
 	fn try_from(value: Cow<str>) -> Result<Self, Self::Error> {
-		Ok(CmdSpec(
+		Ok(MorseWord(
 			value
 				.chars()
 				.map(|c| c.try_into())
@@ -49,7 +48,24 @@ impl TryFrom<Cow<'_, str>> for CmdSpec {
 	}
 }
 
-type Cmds = HashMap<CmdSpec, Command>;
+impl Debug for MorseWord {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_tuple("MorseWord")
+			.field(&format_args!(
+				"{}",
+				self.0
+					.iter()
+					.map(|c| match c {
+						Morse::Long => '—',
+						Morse::Short => '·',
+					})
+					.collect::<String>(),
+			))
+			.finish()
+	}
+}
+
+type Cmds = HashMap<MorseWord, Command>;
 
 #[derive(Deserialize, Debug)]
 enum Command {
@@ -115,8 +131,8 @@ impl ButtonCommands {
 		Ok(ButtonCommands { cmds })
 	}
 
-	pub(crate) fn exec(&self, cmd: Vec<Morse>) -> Option<Running> {
-		self.cmds.get(&CmdSpec(cmd)).and_then(|cmd| match &cmd {
+	pub(crate) fn exec(&self, cmd: MorseWord) -> Option<Running> {
+		self.cmds.get(&cmd).and_then(|cmd| match &cmd {
 			Command::SubProcess { cmd } => match &cmd[..] {
 				[] => unreachable!(),
 				[path, args @ ..] => Some(Running {

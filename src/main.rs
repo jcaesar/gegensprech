@@ -14,7 +14,6 @@ use matrix_sdk::{
 	Client, ClientConfig, LoopCtrl, Session, SyncSettings,
 };
 use serde::{Deserialize, Serialize};
-use std::fs::File;
 use std::future::Future;
 use std::path::PathBuf;
 use std::process::exit;
@@ -22,6 +21,7 @@ use std::{
 	fs,
 	sync::{Arc, Mutex},
 };
+use std::{fs::File, path::Path};
 use tokio::{
 	signal::unix::{signal, SignalKind},
 	sync::mpsc,
@@ -95,6 +95,9 @@ pub struct Run {
 	/// Join channel (wait for invite if not provided)
 	#[clap(short, long)]
 	channel: Option<RoomId>,
+	/// Custom button commands definition file
+	#[clap(short, long)]
+	cmds: Option<PathBuf>,
 	/// Hardware
 	#[clap(subcommand)]
 	hardware: Hardware,
@@ -116,19 +119,12 @@ struct SolderedCustom {
 	button: Option<u8>,
 }
 
-lazy_static::lazy_static! {
-	static ref CFGDIR: ProjectDirs = ProjectDirs::from("de", "liftm", env!("CARGO_CRATE_NAME"))
-		.expect("Can't determine settings directory");
-	static ref SESSION: PathBuf = CFGDIR.config_dir().join("session.json");
-	static ref OPTS: Opts = clap::Parser::parse();
-}
-
 #[tracing::instrument(skip(args))]
-async fn run(args: &Run) -> Result<()> {
+async fn run(args: &Run, session_path: &Path) -> Result<()> {
 	let ctrl_c = tokio::signal::ctrl_c();
 	let mut term = signal(SignalKind::terminate())?;
 	let _leds = status::init_from_args(&args.hardware).context("Status LED init")?;
-	let client = mtx::start().await.context("Matrix startup")?;
+	let client = mtx::start(session_path).await.context("Matrix startup")?;
 	let channel = mtx::channel(args, &client).await.context("Join channel")?;
 
 	let incoming = mtx::recv_audio_messages(&client).await;
@@ -161,12 +157,16 @@ fn keep_alive<T>(channel: &mpsc::Sender<T>) {
 #[tokio::main]
 async fn main() -> Result<()> {
 	tracing_subscriber::fmt::init();
+	let cfgdir: ProjectDirs = ProjectDirs::from("de", "liftm", env!("CARGO_CRATE_NAME"))
+		.expect("Can't determine settings directory");
+	let session_path: PathBuf = cfgdir.config_dir().join("session.json");
+	let opts: Opts = clap::Parser::parse();
 	debug!("sup");
-	debug!(cfg=?*SESSION, opts=?*OPTS, "init");
-	fs::create_dir_all((*SESSION).parent().unwrap()).context("Config dir must exist")?;
-	match &*OPTS {
-		Opts::Login(args) => mtx::login(args).await,
-		Opts::Run(args) => run(args).await,
+	debug!(cfg=?session_path, opts=?opts, "init");
+	fs::create_dir_all(session_path.parent().unwrap()).context("Config dir must exist")?;
+	match &opts {
+		Opts::Login(args) => mtx::login(args, &session_path).await,
+		Opts::Run(args) => run(args, &session_path).await,
 	}?;
 	exit(0);
 }

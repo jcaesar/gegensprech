@@ -4,15 +4,14 @@ mod cmd;
 mod pulse;
 use anyhow::{Context, Result};
 use matrix_sdk::ruma::events::room::message::AudioInfo;
+use once_cell::sync::Lazy;
 use std::sync::Mutex;
 use tokio::{
 	sync::{mpsc, oneshot},
 	task::{spawn_blocking, JoinHandle},
 };
 
-lazy_static::lazy_static! {
-	static ref MUTEX: Mutex<()> = Mutex::new(());
-}
+static MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 pub struct Rec {
 	pub data: Vec<u8>,

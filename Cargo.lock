@@ -553,7 +553,6 @@ dependencies = [
  "futures",
  "gethostname",
  "itertools",
- "lazy_static",
  "libpulse-binding",
  "libpulse-simple-binding",
  "matrix-sdk",

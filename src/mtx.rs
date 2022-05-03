@@ -11,6 +11,7 @@ use matrix_sdk::{
 use regex::Regex;
 use std::{
 	io::Cursor,
+	path::Path,
 	sync::{Arc, Mutex},
 };
 use tokio::{
@@ -31,8 +32,12 @@ fn create_client(hs: &Url) -> Result<Client> {
 }
 
 #[tracing::instrument]
-pub async fn login(args: &Login) -> Result<()> {
-	anyhow::ensure!(args.overwrite || !SESSION.exists(), "{:?} exists", *SESSION);
+pub async fn login(args: &Login, session_path: &Path) -> Result<()> {
+	anyhow::ensure!(
+		args.overwrite || !session_path.exists(),
+		"{:?} exists",
+		session_path
+	);
 	let pw;
 	let pw = match &args.pw {
 		Some(pw) => pw,
@@ -67,20 +72,23 @@ pub async fn login(args: &Login) -> Result<()> {
 		file.mode(0o600);
 	}
 	#[cfg(not(unix))]
-	warn!(session = *SESSION, "Access token may be world readable");
-	let file = file.open(&*SESSION).context("Open session file")?;
+	warn!(
+		session = *session_path,
+		"Access token may be world readable"
+	);
+	let file = file.open(&*session_path).context("Open session file")?;
 	serde_json::to_writer_pretty(&file, &session).context("Write session file")?;
 	debug!(?file, "success");
 	Ok(())
 }
 
 #[tracing::instrument]
-pub async fn start() -> Result<Client> {
+pub async fn start(session_path: &Path) -> Result<Client> {
 	anyhow::ensure!(
-		SESSION.exists(),
+		session_path.exists(),
 		"Session data does not exist, please login first."
 	);
-	let sess = File::open(&*SESSION).context("Open session data")?;
+	let sess = File::open(session_path).context("Open session data")?;
 	let sess: SessionData = serde_json::from_reader(sess).context("Read session data")?;
 	let client = create_client(&sess.homeserver)?;
 	client.restore_login(sess.into()).await?;

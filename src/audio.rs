@@ -48,11 +48,11 @@ impl RecProc {
 	#[tracing::instrument(skip(self))]
 	pub async fn finish(self) -> Result<Rec> {
 		self.done.send(()).ok();
-		Ok(self
+		self
 			.proc
 			.await
 			.context("Recording spawn error")?
-			.context("Recording error")?)
+			.context("Recording error")
 	}
 }
 

@@ -109,7 +109,7 @@ pub async fn channel(args: &Run, client: &Client) -> Result<JoinedRoom> {
 	let chanlist = client.joined_rooms();
 	let scl = chanlist
 		.iter()
-		.map(|c| c.name().unwrap_or(c.room_id().as_str().to_string()))
+		.map(|c| c.name().unwrap_or_else(|| c.room_id().as_str().to_string()))
 		.collect::<Vec<_>>();
 	debug!(chanlist=?scl);
 	let id = match &args.channel {
@@ -169,8 +169,13 @@ pub async fn channel(args: &Run, client: &Client) -> Result<JoinedRoom> {
 					invitation.room_id().clone()
 				}
 				invs @ [_, ..] => {
-					error!(invitations = ?invs.iter().map(|c| c.name().unwrap_or(c.room_id().to_string())).collect::<Vec<_>>(), "Invited to more than one channel, refusing all invitations");
-					let rej = invs.into_iter().map(|inv| inv.reject_invitation());
+					error!(invitations = ?invs
+							.iter()
+							.map(|c| c.name().unwrap_or_else(|| c.room_id().to_string()))
+							.collect::<Vec<_>>(),
+						"Invited to more than one channel, refusing all invitations"
+					);
+					let rej = invs.iter().map(|inv| inv.reject_invitation());
 					let rej = futures::stream::iter(rej)
 						.buffer_unordered(5)
 						.collect::<Vec<_>>()
@@ -228,7 +233,7 @@ pub async fn remote_indicator(
 					debug!(?cond, "marker user filtering");
 					let cond = cond
 						.and_then(|cond| cond.ok())
-						.unwrap_or(Regex::new("").unwrap());
+						.unwrap_or_else(|| Regex::new("").unwrap());
 					for u in u {
 						if Some(&u) == client.user_id().await.as_ref() {
 							continue;
@@ -360,7 +365,6 @@ pub async fn recv_audio_messages(
 							warn!("audio event, no data file");
 						}
 					};
-					return ();
 				}
 			},
 		)

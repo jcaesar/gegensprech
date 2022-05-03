@@ -17,7 +17,7 @@ use std::{
 use tokio::sync::oneshot;
 use tracing::{debug, warn};
 
-static CLIENT_NAME_ARG: &'static str = concat!("--client-name=", env!("CARGO_PKG_NAME"));
+static CLIENT_NAME_ARG: &str = concat!("--client-name=", env!("CARGO_PKG_NAME"));
 
 fn read_pipe(mut pipe: impl Read + Send + 'static) -> oneshot::Receiver<Vec<u8>> {
 	let (sender, receiver) = oneshot::channel();

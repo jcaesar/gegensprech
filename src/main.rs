@@ -45,7 +45,7 @@ impl std::fmt::Debug for SessionData {
 			.field("device_id", &self.device_id)
 			.field(
 				"access_token",
-				if self.access_token.len() > 0 {
+				if !self.access_token.is_empty() {
 					&"<snip>"
 				} else {
 					&"<empty>"

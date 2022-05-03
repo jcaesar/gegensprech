@@ -60,7 +60,7 @@ mod led_color {
 
 struct Seeed(Apa102<spi::Spi>);
 impl Seeed {
-	fn new() -> Result<Box<dyn Render + Send>> {
+	fn new() -> Result<Box<Seeed>> {
 		let spi = spi::Spi::new(
 			spi::Bus::Spi0,
 			spi::SlaveSelect::Ss1,
@@ -104,7 +104,7 @@ impl Render for Seeed {
 pub struct StatusIndicators(Mutex<(Box<dyn Render + Send>, Status)>);
 
 static STATUS: OnceCell<StatusIndicators> = OnceCell::new();
-static STATUS_INIT: &'static str = "Status indicator is initialized at start";
+static STATUS_INIT: &str = "Status indicator is initialized at start";
 
 impl Status {
 	fn initial() -> Status {
@@ -157,11 +157,14 @@ pub(crate) fn send() -> impl UndoOnDrop {
 
 #[tracing::instrument]
 pub(crate) fn init_from_args(args: &Hardware) -> Result<impl UndoOnDrop> {
-	let render = match args {
+	let render: Box<dyn Render + Send> = match args {
 		Hardware::Seeed2Mic => Seeed::new()?,
 		Hardware::SolderedCustom(_) => Box::new(()),
 	};
-	if let Err(_) = STATUS.set(StatusIndicators(Mutex::new((render, Status::initial())))) {
+	if STATUS
+		.set(StatusIndicators(Mutex::new((render, Status::initial()))))
+		.is_err()
+	{
 		error!("Can init status LEDs only once");
 	}
 	status(|_| ());

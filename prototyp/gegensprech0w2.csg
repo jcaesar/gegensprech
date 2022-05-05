@@ -25,9 +25,19 @@ vusb=1;
 usbb=6;
 usbt=3;
 usbh=8;
+hdmit=4;
+hdmih=16;
 vklink=2;
 hklink=6;
 pcb=1.6;
+
+hdmio=12.4;
+usb1o=41.4;
+usb2o=54;
+piplugy=6 - wall;
+klinka=5.6;
+klinko=62 - 23 + hdmio + hdmih / 2 - klinka / 2;
+klinky=7.5 - klinka / 2 + spiel;
 
 dklemm=5;
 seedpower=12;
@@ -113,3 +123,29 @@ translate([-btnw, t + wall / 2, btnh])
 %mirror([1, 0, 0])
 	translate([b / 2 - usbb + 1, t - hklink - 2 * spiel - 1 + pcb, seedpower])
 		cube([usbb, usbt, usbh]);
+
+
+!translate([0, - t - 6 * wall, 0]) {
+	difference() {
+		translate([-b / 2 - vmsd - 2 * wall - spiel, -2 * wall, -wall])
+			cube([b + vmsd + vcam + 4 * wall + 2 * spiel, t + 4 * wall, 3 * wall]);
+		translate([-b / 2 - vmsd - wall - spiel, -wall, 0])
+			cube([b + vmsd + vcam + 2 * wall + 2 * spiel, t + 2 * wall, 3 * wall]);
+		translate([-b / 2 - vmsd - 3 * wall, t + wall, -2 * wall])
+			cube([b + vmsd + vcam + 6 * wall, 2 * wall, 5 * wall]);
+
+		// Uff, I somehow completely messed up the coordinate system. I should have rotated/mirrored this
+		e = vmsd - vcam;
+		translate([-b / 2 + hdmio - hdmih / 2 + e, t - piplugy - wall - hdmit, -2 * wall])
+			cube([hdmih, hdmit, 5 * wall]);
+		translate([-b / 2 + usb1o - usbh / 2 + e, t - piplugy - wall - usbt, -2 * wall])
+			cube([usbh, usbt, 5 * wall]);
+		translate([-b / 2 + usb2o - usbh / 2 + e, t - piplugy - wall - usbt, -2 * wall])
+			cube([usbh, usbt, 5 * wall]);
+
+		translate([-b / 2 + klinko, klinky, -2 * wall])
+			cylinder(r = (klinka + spiel) / 2, h = 3 * wall);
+	}
+	translate([-b / 2 - vmsd , t - wall - spiel, -0.5 * wall])
+		cube([b + vmsd + vcam  , wall, 2.5 * wall]);
+}

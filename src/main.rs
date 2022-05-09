@@ -67,54 +67,44 @@ impl From<SessionData> for Session {
 	}
 }
 
-#[derive(clap::Parser, Debug)]
-enum Opts {
-	/// Generate configuration
-	Login(Login),
-	/// Run normally
-	Run(Run),
-}
-
-#[derive(clap::Parser, Debug)]
-pub struct Login {
-	/// Homeserver URL
-	#[clap(short = 's', long)]
-	hs: Url,
-	/// Login name
-	#[clap(short, long)]
-	user: String,
-	/// Will be read from TTY if possible
-	#[clap(short, long)]
-	pw: Option<String>,
-	/// Do not fail if session file exists
-	#[clap(short = 'f', long)]
-	overwrite: bool,
-}
-
-#[derive(clap::Parser, Debug)]
-pub struct Run {
-	/// Join channel (wait for invite if not provided)
-	#[clap(short, long)]
-	channel: Option<RoomId>,
-	/// Hardware
-	#[clap(subcommand)]
-	hardware: Hardware,
-}
-
-#[derive(clap::Parser, Debug)]
-enum Hardware {
-	/// Seeed 2mic HAT
-	#[clap(name = "seeed-2mic")]
-	Seeed2Mic,
-	/// Custom buttons/LEDs
-	SolderedCustom(SolderedCustom),
-}
-
-#[derive(clap::Parser, Debug)]
-struct SolderedCustom {
-	/// GPIO button number for control
-	#[clap(short, long)]
-	button: Option<u8>,
+structstruck::strike! {
+	#[strikethrough[derive(clap::Parser, Debug)]]
+	enum Opts {
+		/// Generate configuration
+		Login(pub struct {
+			/// Homeserver URL
+			#[clap(short = 's', long)]
+			hs: Url,
+			/// Login name
+			#[clap(short, long)]
+			user: String,
+			/// Will be read from TTY if possible
+			#[clap(short, long)]
+			pw: Option<String>,
+			/// Do not fail if session file exists
+			#[clap(short = 'f', long)]
+			overwrite: bool,
+		}),
+		/// Run normally
+		Run(pub struct {
+			/// Join channel (wait for invite if not provided)
+			#[clap(short, long)]
+			channel: Option<RoomId>,
+			/// Hardware
+			#[clap(subcommand)]
+			hardware: enum {
+				/// Seeed 2mic HAT
+				#[clap(name = "seeed-2mic")]
+				Seeed2Mic,
+				/// Custom buttons/LEDs
+				SolderedCustom(struct {
+					/// GPIO button number for control
+					#[clap(short, long)]
+					button: Option<u8>,
+				}),
+			},
+		}),
+	}
 }
 
 #[tracing::instrument(skip(args))]

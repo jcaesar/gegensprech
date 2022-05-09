@@ -11,27 +11,23 @@ use crate::{
 	Hardware,
 };
 
-#[derive(Debug, Clone, Copy)]
-pub enum AudioStatus {
-	Recording,
-	Playing,
-	Idle,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum MtxStatus {
-	Starting,
-	Good,
-	Disconnected,
-}
-
-#[derive(Debug)]
-struct Status {
-	send_status: bool,
-	catchup_status: bool,
-	mtx_status: MtxStatus,
-	audio_status: AudioStatus,
-	exited: bool,
+structstruck::strike! {
+	#[strikethrough[derive(Debug, Clone)]]
+	struct Status {
+		send_status: bool,
+		catchup_status: bool,
+		mtx_status: #[derive(Copy)] pub enum {
+			Starting,
+			Good,
+			Disconnected,
+		},
+		audio_status: #[derive(Copy)] pub enum {
+			Recording,
+			Playing,
+			Idle,
+		},
+		exited: bool,
+	}
 }
 
 trait Render {

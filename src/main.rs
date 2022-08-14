@@ -15,14 +15,15 @@ use matrix_sdk::{
 	uuid::Uuid,
 	Client, ClientConfig, LoopCtrl, Session, SyncSettings,
 };
+use rppal::gpio::Gpio;
 use serde::{Deserialize, Serialize};
-use std::future::Future;
 use std::process::exit;
 use std::{
 	fs,
 	sync::{Arc, Mutex},
 };
 use std::{fs::File, path::Path};
+use std::{future::Future, str::FromStr};
 use tokio::{
 	signal::unix::{signal, SignalKind},
 	sync::mpsc,
@@ -101,9 +102,50 @@ structstruck::strike! {
 					/// GPIO button number for control
 					#[clap(short, long)]
 					button: Option<u8>,
+					/// RGB LED at Pins
+					///  - Red: Recording
+					///  - Green: Playback
+					///  - Turquoise: Waiting on Server
+					///  - Blue: Waiting for playback by other devices
+					///  - Yellow: Connection problem
+					///  - White: Idle
+					/// If more than three pins are specified, the remaining pins all become ground
+					#[clap(short = 'l', long, verbatim_doc_comment)]
+					rgb: Option<struct RGBPins {
+						r: u8,
+						g: u8,
+						b: u8,
+						ground: Vec<u8>,
+					}>,
 				}),
 			},
 		}),
+	}
+}
+
+impl FromStr for RGBPins {
+	type Err = clap::Error;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let s = s
+			.split([',', ':', ' ', '-'])
+			.map(str::parse::<u8>)
+			.collect::<Result<Vec<_>, _>>()
+			.map_err(|e| {
+				clap::Error::raw(
+					clap::ErrorKind::InvalidValue,
+					format!("Couldn't parse as integer: {e:?}"),
+				)
+			})?;
+		if s.len() < 3 {
+			return Err(clap::Error::raw(
+				clap::ErrorKind::InvalidValue,
+				format!("Need at least three pin numbers"),
+			));
+		}
+		let [r, g, b]: [u8; 3] = s[..3].try_into().unwrap();
+		let ground = s[3..].iter().cloned().collect();
+		Ok(RGBPins { r, g, b, ground })
 	}
 }
 
@@ -111,7 +153,8 @@ structstruck::strike! {
 async fn run(args: &Run, config_dir: &Path) -> Result<()> {
 	let ctrl_c = tokio::signal::ctrl_c();
 	let mut term = signal(SignalKind::terminate())?;
-	let _leds = status::init_from_args(&args.hardware).context("Status LED init")?;
+	let gpio = Gpio::new().context("Open GPIO for Pins")?;
+	let _leds = status::init_from_args(&args.hardware, &gpio).context("Status LED init")?;
 	let cmds = cmd::ButtonCommands::load(config_dir)?;
 	let client = mtx::start(config_dir).await.context("Matrix startup")?;
 	let channel = mtx::channel(args, &client).await.context("Join channel")?;
@@ -127,7 +170,7 @@ async fn run(args: &Run, config_dir: &Path) -> Result<()> {
 		Hardware::Seeed2Mic => Some(17),
 		Hardware::SolderedCustom(SolderedCustom { button, .. }) => button,
 	};
-	let button = button.map(|button| button::read(button, textchannel, cmds, running_cmd));
+	let button = button.map(|button| button::read(button, textchannel, cmds, running_cmd, &gpio));
 
 	tokio::select! {
 		() = sync => (),

@@ -1,14 +1,17 @@
 use anyhow::{Context, Result};
 use apa102_spi::Apa102;
 use once_cell::sync::OnceCell;
-use rppal::spi;
+use rppal::{
+	gpio::{Gpio, Level, OutputPin},
+	spi,
+};
 use smart_leds_trait::{SmartLedsWrite, RGB};
 use std::sync::Mutex;
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::{
 	misc::{CallOnDrop, UndoOnDrop},
-	Hardware,
+	Hardware, RGBPins, SolderedCustom,
 };
 
 structstruck::strike! {
@@ -16,7 +19,7 @@ structstruck::strike! {
 	struct Status {
 		send_status: bool,
 		catchup_status: bool,
-		mtx_status: #[derive(Copy)] pub enum {
+		mtx_status: #[derive(Copy, PartialEq)] pub enum {
 			Starting,
 			Good,
 			Disconnected,
@@ -36,6 +39,76 @@ trait Render {
 
 impl Render for () {
 	fn render(&mut self, _status: &Status) {}
+}
+
+struct RGBLed([OutputPin; 3]);
+
+impl RGBLed {
+	#[tracing::instrument(skip(gpio))]
+	fn new(rgb: &RGBPins, gpio: &Gpio) -> Result<Box<RGBLed>> {
+		let RGBPins { r, b, g, ground } = rgb;
+		let rgb = [r, g, b];
+		for &ground in ground {
+			match gpio.get(ground) {
+				Ok(pin) => pin.into_output_low().set_reset_on_drop(false),
+				Err(e) => warn!("Couldn't ground pin {ground}: {e:?}"),
+			}
+		}
+		let pins = rgb
+			.map(|&p| {
+				Ok(gpio
+					.get(p)
+					.with_context(|| format!("Open pin {p} for RGB LED"))?
+					.into_output_low())
+			})
+			// hgnn, try_map
+			.into_iter()
+			.collect::<Result<Vec<_>>>()?
+			.try_into()
+			.unwrap();
+		Ok(Box::new(Self(pins)))
+	}
+
+	fn color_for(status: &Status) -> [Level; 3] {
+		use self::{AudioStatus::*, MtxStatus::*};
+		use Level::*;
+		let matrix_meh = status.mtx_status != Good;
+		let pending = status.send_status || status.catchup_status;
+		match status {
+			Status { exited: true, .. } => [Low, Low, Low],
+			Status {
+				audio_status: Recording,
+				..
+			} => [High, Low, Low],
+			Status {
+				audio_status: Playing,
+				..
+			} => [Low, High, Low],
+			_ if matrix_meh && pending => [High, Low, High],
+			Status {
+				send_status: true, ..
+			} => [Low, High, High],
+			Status {
+				catchup_status: true,
+				..
+			} => [Low, Low, High],
+			Status {
+				mtx_status: Starting,
+				..
+			} => [Low, High, High],
+			_ => [High, High, High],
+		}
+	}
+}
+
+impl Render for RGBLed {
+	#[tracing::instrument(skip(self))]
+	fn render(&mut self, status: &Status) {
+		let color = Self::color_for(status);
+		for (p, c) in self.0.iter_mut().zip(color) {
+			p.write(c)
+		}
+	}
 }
 
 mod led_color {
@@ -144,9 +217,10 @@ pub(crate) fn send() -> impl UndoOnDrop {
 }
 
 #[tracing::instrument]
-pub(crate) fn init_from_args(args: &Hardware) -> Result<impl UndoOnDrop> {
+pub(crate) fn init_from_args(args: &Hardware, gpio: &Gpio) -> Result<impl UndoOnDrop> {
 	let render: Box<dyn Render + Send> = match args {
 		Hardware::Seeed2Mic => Seeed::new()?,
+		Hardware::SolderedCustom(SolderedCustom { rgb: Some(rgb), .. }) => RGBLed::new(rgb, gpio)?,
 		Hardware::SolderedCustom(_) => Box::new(()),
 	};
 	if STATUS

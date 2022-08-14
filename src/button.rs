@@ -168,9 +168,10 @@ pub async fn read(
 	messages: Sender<audio::Rec>,
 	cmds: crate::cmd::ButtonCommands,
 	running: Arc<Mutex<Option<crate::cmd::Running>>>,
+	gpio: &Gpio,
 ) -> Result<()> {
 	tracing::info!(raspi=?DeviceInfo::new());
-	let mut button = Button::new(EdgeDeb::new(Gpio::new()?.get(button)?)?);
+	let mut button = Button::new(EdgeDeb::new(gpio.get(button)?)?);
 	tokio::task::spawn_blocking(move || -> Result<()> {
 		loop {
 			let et = button.next(None)?;

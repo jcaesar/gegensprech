@@ -23,21 +23,21 @@ vmsd=3;
 vcam=1;
 vusb=1;
 usbb=6;
-usbt=3;
-usbh=8;
-hdmit=4;
-hdmih=16;
+usbt=3.5;
+usbh=9;
+hdmit=4.2;
+hdmih=12.7;
 vklink=2;
 hklink=6;
 pcb=1.6;
 
-hdmio=12.4;
-usb1o=41.4;
-usb2o=54;
-piplugy=6 - wall;
-klinka=5.6;
-klinko=62 - 23 + hdmio + hdmih / 2 - klinka / 2;
-klinky=7.5 - klinka / 2 + spiel;
+hdmio=12.4 - 2;
+usb1o=41.4 + 0.1;
+usb2o=54 + 0.1;
+piplugy=3.6;
+klinka=6;
+klinko=55.1;
+klinky=5.5 - klinka / 2 + spiel;
 
 dklemm=5;
 seedpower=12;
@@ -138,12 +138,12 @@ translate([-btnw, t + wall / 2, btnh])
 		e = vmsd - vcam;
 		translate([-b / 2 + hdmio - hdmih / 2 + e, t - piplugy - wall - hdmit, -2 * wall])
 			cube([hdmih, hdmit, 5 * wall]);
-		translate([-b / 2 + usb1o - usbh / 2 + e, t - piplugy - wall - usbt, -2 * wall])
+		translate([-b / 2 + usb1o - usbh / 2, t - piplugy - wall - usbt, -2 * wall])
 			cube([usbh, usbt, 5 * wall]);
-		translate([-b / 2 + usb2o - usbh / 2 + e, t - piplugy - wall - usbt, -2 * wall])
+		translate([-b / 2 + usb2o - usbh / 2, t - piplugy - wall - usbt, -2 * wall])
 			cube([usbh, usbt, 5 * wall]);
 
-		translate([-b / 2 + klinko, klinky, -2 * wall])
+		translate([-b / 2 + klinko, klinky + wall, -2 * wall])
 			cylinder(r = (klinka + spiel) / 2, h = 3 * wall);
 	}
 	translate([-b / 2 - vmsd , t - wall - spiel, -0.5 * wall])

@@ -91,6 +91,9 @@ structstruck::strike! {
 			/// Join channel (wait for invite if not provided)
 			#[clap(short, long)]
 			channel: Option<RoomId>,
+			/// Leave joined channels other than the one specified
+			#[clap(long)]
+			leave: bool,
 			/// Hardware
 			#[clap(subcommand)]
 			hardware: enum {

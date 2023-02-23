@@ -1,4 +1,5 @@
 use crate::{audio::Rec, misc::keep_alive, status::MtxStatus, *};
+use futures::TryStreamExt;
 use matrix_sdk::{
 	instant::SystemTime,
 	room::Room,
@@ -118,18 +119,17 @@ pub async fn channel(args: &Run, client: &Client) -> Result<JoinedRoom> {
 	debug!(chanlist=?scl);
 	let id = match &args.channel {
 		Some(channel) => {
-			let leave =
-				futures::stream::iter(chanlist.into_iter().filter(|r| r.room_id() != channel))
-					.map(|r| async move { r.leave().await })
-					.buffer_unordered(5)
-					.collect::<Vec<_>>()
-					.await;
 			client
 				.join_room_by_id(channel)
 				.await
 				.context("Join as specified")?;
-			for leave in leave {
-				leave.context("Leaving superfluous channel")?;
+			if args.leave {
+				futures::stream::iter(chanlist.into_iter().filter(|r| r.room_id() != channel))
+					.map(|r| async move { r.leave().await })
+					.buffer_unordered(5)
+					.try_collect::<()>()
+					.await
+					.context("Leaving superfluous channel")?;
 			}
 			channel.clone()
 		}
@@ -137,7 +137,7 @@ pub async fn channel(args: &Run, client: &Client) -> Result<JoinedRoom> {
 			[chan] => chan.room_id().clone(),
 			[_, ..] => {
 				anyhow::bail!(
-					"Joined more than one channel: {}. (Specify channel parameter to leave others)",
+					"Joined more than one channel: {}. (Specify channel parameter)",
 					scl.join(" ")
 				);
 			}

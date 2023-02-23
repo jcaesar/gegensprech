@@ -90,7 +90,7 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 		anyhow::ensure!(data.len() > 500, "Short recording");
 		let data = ogg_opus::encode::<48000, 1>(&data).context("OGG Opus encode")?;
 		let mut info: AudioInfo = AudioInfo::new();
-		info.duration = UInt::new(Instant::now().duration_since(start).as_secs());
+		info.duration = Some(Instant::now().duration_since(start));
 		info.mimetype = Some("media/ogg".to_owned());
 		info.size = UInt::new(data.len() as u64);
 		Ok(Rec { data, info })

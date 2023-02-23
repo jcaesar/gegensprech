@@ -1,17 +1,20 @@
 use crate::{audio::Rec, misc::keep_alive, status::MtxStatus, *};
 use futures::TryStreamExt;
 use matrix_sdk::{
+	config::SyncSettings,
 	instant::SystemTime,
 	room::Room,
-	ruma::events::{
-		receipt::{Receipt, ReceiptEventContent},
-		room::message::{MessageEventContent, MessageType},
-		SyncEphemeralRoomEvent, SyncMessageEvent,
+	ruma::{
+		events::{
+			receipt::{Receipt, ReceiptEventContent},
+			room::message::{MessageType, RoomMessageEventContent},
+			SyncEphemeralRoomEvent, SyncMessageLikeEvent,
+		},
+		TransactionId,
 	},
 };
 use regex::Regex;
 use std::{
-	io::Cursor,
 	path::Path,
 	sync::{Arc, Mutex},
 };
@@ -23,14 +26,18 @@ use tokio::{
 static SESSION_PATH: &str = "session.json";
 
 #[tracing::instrument]
-fn create_client(hs: &Url) -> Result<Client> {
-	let client_config = ClientConfig::default().user_agent(&format!(
-		"{}/{}",
-		env!("CARGO_CRATE_NAME"),
-		env!("CARGO_PKG_VERSION")
-	))?;
-	let client = Client::new_with_config(hs.clone(), client_config)?;
-	//client.store().open_default(CFGDIR.data_dir(), None).context("Open state cache")?;
+async fn create_client(hs: &Url) -> Result<Client> {
+	let client = Client::builder()
+		.user_agent(&format!(
+			"{}/{}",
+			env!("CARGO_CRATE_NAME"),
+			env!("CARGO_PKG_VERSION")
+		))
+		.homeserver_url(hs.clone())
+		//.store_config(StoreConfig::new())
+		.build()
+		.await
+		.context("Build client")?;
 	Ok(client)
 }
 
@@ -47,18 +54,20 @@ pub async fn login(args: &Login, config_dir: &Path) -> Result<()> {
 		Some(pw) => pw,
 		None => {
 			let prompt = format!("Login password for {} at {}: ", args.user, args.hs);
-			pw = rpassword::read_password_from_tty(Some(&prompt)).context("Read password")?;
+			pw = rpassword::prompt_password(&prompt).context("Read password")?;
 			pw.as_str()
 		}
 	};
-	let client = create_client(&args.hs)?;
+	let client = create_client(&args.hs).await?;
 	let devname = format!(
 		"{} on {}",
 		env!("CARGO_CRATE_NAME"),
 		gethostname().to_string_lossy()
 	);
 	let login = client
-		.login(&args.user, pw, None, Some(&devname))
+		.login_username(&args.user, pw)
+		.initial_device_display_name(&devname)
+		.send()
 		.await
 		.context("Login")?;
 	let session = SessionData {
@@ -66,6 +75,7 @@ pub async fn login(args: &Login, config_dir: &Path) -> Result<()> {
 		access_token: login.access_token,
 		device_id: login.device_id,
 		user_id: login.user_id,
+		refresh_token: login.refresh_token,
 	};
 	info!(?session, "logged in");
 	let mut file = fs::OpenOptions::new();
@@ -95,7 +105,7 @@ pub async fn start(config_dir: &Path) -> Result<Client> {
 	);
 	let sess = File::open(session_path).context("Open session data")?;
 	let sess: SessionData = serde_json::from_reader(sess).context("Read session data")?;
-	let client = create_client(&sess.homeserver)?;
+	let client = create_client(&sess.homeserver).await?;
 	client.restore_login(sess.into()).await?;
 	debug!(woami=?client.whoami().await, "logged in");
 	status::mtx(MtxStatus::Starting);
@@ -117,7 +127,7 @@ pub async fn channel(args: &Run, client: &Client) -> Result<JoinedRoom> {
 		.map(|c| c.name().unwrap_or_else(|| c.room_id().as_str().to_string()))
 		.collect::<Vec<_>>();
 	debug!(chanlist=?scl);
-	let id = match &args.channel {
+	let id: OwnedRoomId = match &args.channel {
 		Some(channel) => {
 			client
 				.join_room_by_id(channel)
@@ -134,7 +144,7 @@ pub async fn channel(args: &Run, client: &Client) -> Result<JoinedRoom> {
 			channel.clone()
 		}
 		None => match &chanlist[..] {
-			[chan] => chan.room_id().clone(),
+			[chan] => chan.room_id().to_owned(),
 			[_, ..] => {
 				anyhow::bail!(
 					"Joined more than one channel: {}. (Specify channel parameter)",
@@ -169,8 +179,9 @@ pub async fn channel(args: &Run, client: &Client) -> Result<JoinedRoom> {
 								},
 							}
 						})
-						.await;
-					invitation.room_id().clone()
+						.await
+						.context("Invitation accept sync")?;
+					invitation.room_id().to_owned()
 				}
 				invs @ [_, ..] => {
 					error!(invitations = ?invs
@@ -205,73 +216,71 @@ pub async fn remote_indicator(
 	client: Client,
 	expect_caught_up_to: Arc<Mutex<Option<SystemTime>>>,
 ) {
-	let here = room.room_id().clone();
-	client
-		.register_event_handler(
-			move |ev: SyncEphemeralRoomEvent<ReceiptEventContent>, room: Room, client: Client| {
-				let here = here.clone();
-				let ecu = *expect_caught_up_to.lock().unwrap();
-				async move {
-					let ecu = match ecu {
-						Some(ecu) => ecu,
-						None => return,
-					};
-					if room.room_id() != &here {
+	let here = room.room_id().to_owned();
+	client.add_event_handler(
+		move |ev: SyncEphemeralRoomEvent<ReceiptEventContent>, room: Room, client: Client| {
+			let here = here.clone();
+			let ecu = *expect_caught_up_to.lock().unwrap();
+			async move {
+				let ecu = match ecu {
+					Some(ecu) => ecu,
+					None => return,
+				};
+				if room.room_id() != here {
+					return;
+				}
+				debug!(?ev);
+				let u = match room.joined_user_ids().await {
+					Ok(u) => u,
+					Err(error) => {
+						warn!(?error, "Failed to get users for status");
 						return;
 					}
-					debug!(?ev);
-					let u = match room.joined_user_ids().await {
-						Ok(u) => u,
-						Err(error) => {
-							warn!(?error, "Failed to get users for status");
-							return;
+				};
+				let cond = room.topic().and_then(|topic| {
+					topic
+						.lines()
+						.filter_map(|l| l.strip_prefix("gegensprech-markers: "))
+						.next()
+						.map(Regex::new)
+				});
+				debug!(?cond, "marker user filtering");
+				let cond = cond
+					.and_then(|cond| cond.ok())
+					.unwrap_or_else(|| Regex::new("").unwrap());
+				for u in u {
+					if Some(u.as_ref()) == client.user_id() {
+						continue;
+					}
+					if !cond.is_match(u.as_str()) {
+						continue;
+					}
+					let rr = room.user_read_receipt(&u).await;
+					trace!(?rr, ?u);
+					let ts = match rr {
+						Ok(Some((_, Receipt { ts: Some(ts), .. }))) => ts,
+						Ok(_) => continue,
+						Err(err) => {
+							warn!(?here, ?u, ?err, "Can't get read receipt");
+							continue;
 						}
 					};
-					let cond = room.topic().and_then(|topic| {
-						topic
-							.lines()
-							.filter_map(|l| l.strip_prefix("gegensprech-markers: "))
-							.next()
-							.map(Regex::new)
-					});
-					debug!(?cond, "marker user filtering");
-					let cond = cond
-						.and_then(|cond| cond.ok())
-						.unwrap_or_else(|| Regex::new("").unwrap());
-					for u in u {
-						if Some(&u) == client.user_id().await.as_ref() {
-							continue;
-						}
-						if !cond.is_match(u.as_str()) {
-							continue;
-						}
-						let rr = room.user_read_receipt(&u).await;
-						trace!(?rr, ?u);
-						let ts = match rr {
-							Ok(Some((_, Receipt { ts: Some(ts), .. }))) => ts,
-							Ok(_) => continue,
-							Err(err) => {
-								warn!(?here, ?u, ?err, "Can't get read receipt");
-								continue;
-							}
-						};
-						// This smells like a leap second bug.
-						// TODO: Implement proper before or after based on timeline
-						if ts
-							.to_system_time()
-							.expect("Unreasonable UInt of milliseconds")
-							< ecu
-						{
-							debug!(?u, "Not caught up");
-							status::caughtup(false);
-							return;
-						}
+					// This smells like a leap second bug.
+					// TODO: Implement proper before or after based on timeline
+					if ts
+						.to_system_time()
+						.expect("Unreasonable UInt of milliseconds")
+						< ecu
+					{
+						debug!(?u, "Not caught up");
+						status::caughtup(false);
+						return;
 					}
-					status::caughtup(true);
 				}
-			},
-		)
-		.await;
+				status::caughtup(true);
+			}
+		},
+	);
 }
 
 #[tracing::instrument(skip(client))]
@@ -285,24 +294,25 @@ pub fn oggsender(
 	let process = async move {
 		use matrix_sdk::ruma::events::{
 			room::message::{AudioMessageEventContent, MessageType},
-			AnyMessageEventContent,
+			AnyMessageLikeEventContent,
 		};
 
 		loop {
 			let Rec { data, info } = rx.recv().await.context("recorder sender")?;
 			let _sending_status = status::send();
 			let data = client
+				.media()
 				.upload(
 					&info
 						.mimetype
 						.as_deref()
 						.unwrap_or("application/octet-stream")
 						.parse()?,
-					&mut Cursor::new(data),
+					&data,
 				)
 				.await?;
 
-			let content = AnyMessageEventContent::RoomMessage(MessageEventContent::new(
+			let content = AnyMessageLikeEventContent::RoomMessage(RoomMessageEventContent::new(
 				MessageType::Audio(AudioMessageEventContent::plain(
 					"Aufnahme".to_owned(),
 					data.content_uri,
@@ -310,69 +320,70 @@ pub fn oggsender(
 				)),
 			));
 
-			let txn_id = Uuid::new_v4();
+			let txn_id = TransactionId::new();
 			status::caughtup(false);
 			*expect_caught_up_to.lock().unwrap() = Some(SystemTime::now());
-			room.send(content, Some(txn_id)).await.unwrap();
+			room.send(content, Some(&txn_id)).await.unwrap();
 		}
 	};
 	keep_alive(&tx); // Dumb if we exit due to an error elsewhere that'll take us down anyway
 	(process, tx)
 }
 
-#[tracing::instrument(skip(client))]
 pub async fn recv_audio_messages(
 	client: &Client,
 ) -> mpsc::Receiver<(Vec<u8>, Option<String>, oneshot::Sender<()>)> {
 	let (tx, rx) = mpsc::channel(4);
-	client
-		.register_event_handler(
-			move |ev: SyncMessageEvent<MessageEventContent>, room: Room, client: Client| {
-				let tx = tx.clone();
-				async move {
-					debug!(?ev, "received");
-					if Some(ev.sender) == client.user_id().await {
-						return;
-					}
-					let eid = ev.event_id;
-					if let MessageType::Audio(amc) = ev.content.msgtype {
-						info!(?amc, "received audio");
-						let mtyp = amc
-							.info
-							.as_ref()
-							.and_then(|info| info.mimetype.as_ref())
-							.cloned();
-						let data = client.get_file(amc, false).await.expect("dl");
-						if let Some(data) = data {
-							let (play, played) = oneshot::channel();
-							tx.send((data, mtyp, play)).await.expect("pipesend");
-							tokio::spawn(async move {
-								let res = (move || async move {
-									let room = match room {
-										Room::Joined(j) => Some(j),
-										_ => None,
-									}
-									.context("Room not joined")?;
-									let x = played.await;
-									x.context("Not played")?;
-									room.read_marker(&eid, Some(&eid))
-										.await
-										.context("Marker request error")?;
-									Result::<_, anyhow::Error>::Ok(())
-								})()
-								.await;
-								if let Err(e) = res {
-									warn!(?e, "Didn't set read marker")
-								}
-							});
-						} else {
-							warn!("audio event, no data file");
-						}
-					};
+	client.add_event_handler(
+		move |ev: SyncMessageLikeEvent<RoomMessageEventContent>, room: Room, client: Client| {
+			let tx = tx.clone();
+			async move {
+				debug!(?ev, "received");
+				if Some(ev.sender()) == client.user_id() {
+					return;
 				}
-			},
-		)
-		.await;
+				let ev = match ev.as_original() {
+					Some(ev) => ev.to_owned(),
+					None => return,
+				};
+				let eid = ev.event_id;
+				if let MessageType::Audio(amc) = ev.content.msgtype {
+					info!(?amc, "received audio");
+					let mtyp = amc
+						.info
+						.as_ref()
+						.and_then(|info| info.mimetype.as_ref())
+						.cloned();
+					let data = client.media().get_file(amc, false).await.expect("dl");
+					if let Some(data) = data {
+						let (play, played) = oneshot::channel();
+						tx.send((data, mtyp, play)).await.expect("pipesend");
+						tokio::spawn(async move {
+							let res = (move || async move {
+								let room = match room {
+									Room::Joined(j) => Some(j),
+									_ => None,
+								}
+								.context("Room not joined")?;
+								let x = played.await;
+								x.context("Not played")?;
+								room.read_marker(&eid, Some(&eid))
+									.await
+									.context("Marker request error")?;
+								Result::<_, anyhow::Error>::Ok(())
+							})()
+							.await;
+							if let Err(e) = res {
+								warn!(?e, "Didn't set read marker")
+							}
+						});
+					} else {
+						warn!("audio event, no data file");
+					}
+				};
+			}
+		},
+	);
 	rx
 }
 
@@ -398,10 +409,11 @@ pub async fn sync(client: &Client) {
 		}
 	});
 
-	client
+	let () = client
 		.sync_with_callback(ss, move |_| {
 			*last_sync.lock().unwrap() = Instant::now();
 			async { LoopCtrl::Continue }
 		})
-		.await;
+		.await
+		.expect("infinite loop finished");
 }

@@ -11,9 +11,8 @@ use gethostname::gethostname;
 use matrix_sdk::{
 	instant::{Duration, Instant},
 	room::Joined as JoinedRoom,
-	ruma::{DeviceIdBox, RoomId, UserId},
-	uuid::Uuid,
-	Client, ClientConfig, LoopCtrl, Session, SyncSettings,
+	ruma::{OwnedDeviceId, OwnedRoomId, OwnedUserId},
+	Client, LoopCtrl, Session,
 };
 use rppal::gpio::Gpio;
 use serde::{Deserialize, Serialize};
@@ -35,8 +34,10 @@ use url::Url;
 struct SessionData {
 	homeserver: Url,
 	access_token: String,
-	device_id: DeviceIdBox,
-	user_id: UserId,
+	device_id: OwnedDeviceId,
+	user_id: OwnedUserId,
+	#[serde(default)]
+	refresh_token: Option<String>,
 }
 
 impl std::fmt::Debug for SessionData {
@@ -64,12 +65,13 @@ impl From<SessionData> for Session {
 			access_token: session.access_token,
 			device_id: session.device_id,
 			user_id: session.user_id,
+			refresh_token: session.refresh_token,
 		}
 	}
 }
 
 structstruck::strike! {
-	#[strikethrough[derive(clap::Parser, Debug)]]
+	#[strikethrough[derive(clap::Parser, Debug, Clone)]]
 	enum Opts {
 		/// Generate configuration
 		Login(pub struct {
@@ -90,7 +92,7 @@ structstruck::strike! {
 		Run(pub struct {
 			/// Join channel (wait for invite if not provided)
 			#[clap(short, long)]
-			channel: Option<RoomId>,
+			channel: Option<OwnedRoomId>,
 			/// Leave joined channels other than the one specified
 			#[clap(long)]
 			leave: bool,
@@ -136,13 +138,13 @@ impl FromStr for RGBPins {
 			.collect::<Result<Vec<_>, _>>()
 			.map_err(|e| {
 				clap::Error::raw(
-					clap::ErrorKind::InvalidValue,
+					clap::error::ErrorKind::InvalidValue,
 					format!("Couldn't parse as integer: {e:?}"),
 				)
 			})?;
 		if s.len() < 3 {
 			return Err(clap::Error::raw(
-				clap::ErrorKind::InvalidValue,
+				clap::error::ErrorKind::InvalidValue,
 				format!("Need at least three pin numbers"),
 			));
 		}

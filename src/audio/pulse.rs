@@ -1,20 +1,17 @@
-use super::Rec;
 use crate::status;
 use crate::status::AudioStatus;
 use anyhow::{Context, Result};
-use itertools::Itertools;
 use libpulse_binding::{
 	sample::{Format, Spec},
 	stream::Direction,
 };
 use libpulse_simple_binding::Simple;
-use matrix_sdk::ruma::{events::room::message::AudioInfo, UInt};
-use std::io::Cursor;
-use tokio::sync::oneshot;
 
-const SAMPLE_RATE: u32 = 16000;
+use std::{io::Cursor, ops::ControlFlow};
 
-pub(crate) fn record(mut cont: oneshot::Receiver<()>) -> Result<Rec> {
+pub(crate) const SAMPLE_RATE: u32 = 16000;
+
+pub(crate) fn record(mut sample: impl FnMut(&[u8]) -> Result<ControlFlow<()>>) -> Result<()> {
 	let input = Simple::new(
 		None,
 		env!("CARGO_PKG_NAME"),
@@ -22,7 +19,7 @@ pub(crate) fn record(mut cont: oneshot::Receiver<()>) -> Result<Rec> {
 		None,
 		"recording message",
 		&Spec {
-			format: Format::S16NE,
+			format: Format::S16le,
 			channels: 1,
 			rate: SAMPLE_RATE,
 		},
@@ -30,30 +27,14 @@ pub(crate) fn record(mut cont: oneshot::Receiver<()>) -> Result<Rec> {
 		None,
 	)
 	.context("Pulseaudio open")?;
-	let mut recorded = Vec::with_capacity(SAMPLE_RATE as usize * 2);
-	let mut led_guard = None;
 	loop {
 		let mut block = [0; 2048];
 		input.read(&mut block)?;
-		for (b1, b2) in block.iter().tuples() {
-			recorded.push(i16::from_ne_bytes([*b1, *b2]))
-		}
-		match cont.try_recv() {
-			Err(oneshot::error::TryRecvError::Empty) => (),
-			Ok(()) => break,
-			Err(e) => Err(e).context("aborted")?,
-		}
-		led_guard.get_or_insert_with(|| status::audio(AudioStatus::Recording));
+		if sample(&block)?.is_break() {
+			break;
+		};
 	}
-	let data = ogg_opus::encode::<SAMPLE_RATE, 1>(&recorded[..]).context("OGG Opus encode")?;
-	let info = {
-		let mut ai = AudioInfo::new();
-		ai.duration = UInt::new(recorded.len() as u64 * 1000 / SAMPLE_RATE as u64);
-		ai.mimetype = Some("media/ogg".to_owned());
-		ai.size = UInt::new(data.len() as u64);
-		ai
-	};
-	Ok(Rec { info, data })
+	Ok(())
 }
 
 pub(crate) fn play(data: Vec<u8>, mtyp: Option<String>) -> Result<()> {

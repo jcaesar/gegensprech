@@ -3,13 +3,20 @@ mod cmd;
 #[cfg(feature = "audio-as-lib")]
 mod pulse;
 use anyhow::{Context, Result};
-use matrix_sdk::ruma::events::room::message::AudioInfo;
+use itertools::Itertools;
+use matrix_sdk::ruma::{events::room::message::AudioInfo, UInt};
 use once_cell::sync::Lazy;
-use std::sync::{Arc, Mutex};
+use std::{
+	ops::ControlFlow,
+	sync::{Arc, Mutex},
+	time::Duration,
+};
 use tokio::{
 	sync::{mpsc, oneshot},
 	task::{spawn_blocking, JoinHandle},
 };
+
+use crate::status::{self, AudioStatus};
 
 static MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -38,10 +45,41 @@ impl RecProc {
 		let (done, cont) = oneshot::channel::<()>();
 		let proc = spawn_blocking(move || {
 			let _guard = MUTEX.lock();
-			#[cfg(feature = "audio-as-lib")]
-			return pulse::record(cont);
 			#[cfg(not(feature = "audio-as-lib"))]
-			return cmd::record(cont);
+			use cmd::SAMPLE_RATE;
+			#[cfg(feature = "audio-as-lib")]
+			use pulse::SAMPLE_RATE;
+			let mut recorded = Vec::with_capacity(SAMPLE_RATE as usize * 2);
+			let mut led_guard = None;
+			let mut sample = |block: &[u8]| {
+				for (b1, b2) in block.iter().tuples() {
+					recorded.push(i16::from_le_bytes([*b1, *b2]))
+				}
+				match cont.try_recv() {
+					Err(oneshot::error::TryRecvError::Empty) => {
+						led_guard.get_or_insert_with(|| status::audio(AudioStatus::Recording));
+						Ok(ControlFlow::Continue(()))
+					}
+					Ok(()) => Ok(ControlFlow::Break(())),
+					Err(e) => Err(e).context("aborted"),
+				}
+			};
+			#[cfg(feature = "audio-as-lib")]
+			pulse::record(sample)?;
+			#[cfg(not(feature = "audio-as-lib"))]
+			cmd::record(sample)?;
+			let data =
+				ogg_opus::encode::<SAMPLE_RATE, 1>(&recorded[..]).context("OGG Opus encode")?;
+			let info = {
+				let mut ai = AudioInfo::new();
+				ai.duration = Some(Duration::from_secs_f64(
+					recorded.len() as f64 / SAMPLE_RATE as f64,
+				));
+				ai.mimetype = Some("media/ogg".to_owned());
+				ai.size = UInt::new(data.len() as u64);
+				ai
+			};
+			Ok(Rec { info, data })
 		});
 		RecProc { done, proc }
 	}

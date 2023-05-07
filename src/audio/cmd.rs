@@ -1,14 +1,12 @@
-use crate::audio::Rec;
 use crate::status;
 use crate::status::AudioStatus;
 use anyhow::{Context, Result};
-use itertools::Itertools;
-use matrix_sdk::ruma::{events::room::message::AudioInfo, UInt};
 use signal_child::Signalable;
 use std::{
 	borrow::Cow,
 	io::{Cursor, Read, Write},
 	mem,
+	ops::ControlFlow,
 	os::unix::process::ExitStatusExt,
 	process::{Command, Stdio},
 	thread,
@@ -29,24 +27,10 @@ fn read_pipe(mut pipe: impl Read + Send + 'static) -> oneshot::Receiver<Vec<u8>>
 	receiver
 }
 
-fn record_read(mut pipe: impl Read + Send + 'static) -> oneshot::Receiver<Result<Vec<u8>>> {
-	let (sender, receiver) = oneshot::channel();
-	thread::spawn(move || {
-		sender
-			.send((|| {
-				let mut buf = vec![0; 48];
-				pipe.read_exact(&mut buf[..])?;
-				let _guard = status::audio(AudioStatus::Recording);
-				pipe.read_to_end(&mut buf)?;
-				Ok(buf)
-			})())
-			.ok();
-	});
-	receiver
-}
+pub(crate) const SAMPLE_RATE: u32 = 48000;
 
-#[tracing::instrument(skip(cont))]
-pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
+// #[tracing::instrument(skip(sample))]
+pub(crate) fn record(mut sample: impl FnMut(&[u8]) -> Result<ControlFlow<()>>) -> Result<()> {
 	let mut recorder = Command::new("pacat")
 		.args([
 			"--record",
@@ -54,7 +38,7 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 			"--raw",
 			"--format=s16le",
 			"--channels=1",
-			"--rate=48000",
+			format!("--rate={}", SAMPLE_RATE).as_str(),
 			"--latency-msec=50",
 		])
 		.stdin(Stdio::null())
@@ -63,9 +47,16 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 		.spawn()
 		.context("$ pacat --record")?;
 	let start = Instant::now();
-	let stdout = record_read(recorder.stdout.take().unwrap());
+	let stdout = recorder.stdout.take().unwrap();
 	let stderr = read_pipe(recorder.stderr.take().unwrap());
-	cont.blocking_recv().ok();
+	loop {
+		let mut block = [0; 2048];
+		stdout.read(&mut block)?;
+		if sample(&block)?.is_break() {
+			break;
+			// TODO: losing some samples in stdout here...
+		};
+	}
 	recorder.interrupt().context("Stop subcommand")?;
 	let exited = recorder.wait().context("Process exit waiting failure")?;
 	debug!(
@@ -76,24 +67,7 @@ pub(crate) fn record(cont: oneshot::Receiver<()>) -> Result<Rec> {
 		"pacat exited"
 	);
 	if exited.success() || exited.signal() == Some(1) {
-		let data = stdout
-			.blocking_recv()
-			.unwrap()
-			.context("read pacat --record sdtout")?;
-		let data = data
-			.into_iter()
-			.tuples()
-			.map(|(a, b)| i16::from_le_bytes([a, b]))
-			.collect::<Vec<_>>();
-		// Pulseaudio and pacat have a startup time. If the button is released before that is done…
-		// TODO: Make sure this doesn't cause an exit with error
-		anyhow::ensure!(data.len() > 500, "Short recording");
-		let data = ogg_opus::encode::<48000, 1>(&data).context("OGG Opus encode")?;
-		let mut info: AudioInfo = AudioInfo::new();
-		info.duration = Some(Instant::now().duration_since(start));
-		info.mimetype = Some("media/ogg".to_owned());
-		info.size = UInt::new(data.len() as u64);
-		Ok(Rec { data, info })
+		Ok(())
 	} else {
 		let stderr = &stderr.blocking_recv().unwrap();
 		let stderr = String::from_utf8_lossy(stderr);

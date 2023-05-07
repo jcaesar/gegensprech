@@ -7,7 +7,7 @@ use libpulse_binding::{
 };
 use libpulse_simple_binding::Simple;
 
-use std::{io::Cursor, ops::ControlFlow};
+use std::ops::ControlFlow;
 
 pub(crate) const SAMPLE_RATE: u32 = 16000;
 
@@ -37,14 +37,10 @@ pub(crate) fn record(mut sample: impl FnMut(&[u8]) -> Result<ControlFlow<()>>) -
 	Ok(())
 }
 
-pub(crate) fn play(data: Vec<u8>, mtyp: Option<String>) -> Result<()> {
-	let (data, meta) = ogg_opus::decode::<_, 16000>(Cursor::new(data)).context(format!(
-		"Decode {} as OGG Opus",
-		mtyp.as_deref().unwrap_or("MIME unknown")
-	))?;
+pub(crate) fn play(data: &[i16], channels: u8) -> Result<()> {
 	let spec = Spec {
-		format: Format::S16NE,
-		channels: meta.channels as u8,
+		format: Format::S16le,
+		channels,
 		rate: SAMPLE_RATE,
 	};
 	anyhow::ensure!(spec.is_valid(), "Playback spec invalid (weird channels?)");

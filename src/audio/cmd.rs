@@ -4,13 +4,12 @@ use anyhow::{Context, Result};
 use signal_child::Signalable;
 use std::{
 	borrow::Cow,
-	io::{Cursor, Read, Write},
+	io::{Read, Write},
 	mem,
 	ops::ControlFlow,
 	os::unix::process::ExitStatusExt,
 	process::{Command, Stdio},
 	thread,
-	time::Instant,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, warn};
@@ -29,7 +28,7 @@ fn read_pipe(mut pipe: impl Read + Send + 'static) -> oneshot::Receiver<Vec<u8>>
 
 pub(crate) const SAMPLE_RATE: u32 = 48000;
 
-// #[tracing::instrument(skip(sample))]
+#[tracing::instrument(skip(sample))]
 pub(crate) fn record(mut sample: impl FnMut(&[u8]) -> Result<ControlFlow<()>>) -> Result<()> {
 	let mut recorder = Command::new("pacat")
 		.args([
@@ -46,12 +45,11 @@ pub(crate) fn record(mut sample: impl FnMut(&[u8]) -> Result<ControlFlow<()>>) -
 		.stderr(Stdio::piped())
 		.spawn()
 		.context("$ pacat --record")?;
-	let start = Instant::now();
-	let stdout = recorder.stdout.take().unwrap();
+	let mut stdout = recorder.stdout.take().unwrap();
 	let stderr = read_pipe(recorder.stderr.take().unwrap());
 	loop {
 		let mut block = [0; 2048];
-		stdout.read(&mut block)?;
+		stdout.read_exact(&mut block)?;
 		if sample(&block)?.is_break() {
 			break;
 			// TODO: losing some samples in stdout here...
@@ -80,9 +78,7 @@ pub(crate) fn record(mut sample: impl FnMut(&[u8]) -> Result<ControlFlow<()>>) -
 }
 
 #[tracing::instrument(skip(data))]
-pub(crate) fn play(data: Vec<u8>, mtyp: Option<String>) -> Result<()> {
-	let (data, meta) =
-		ogg_opus::decode::<_, 48000>(Cursor::new(data)).context("OGG Opus decode")?;
+pub(crate) fn play(data: &[i16], channels: u16) -> Result<()> {
 	let data = data
 		.into_iter()
 		.flat_map(|s| s.to_le_bytes())
@@ -96,8 +92,8 @@ pub(crate) fn play(data: Vec<u8>, mtyp: Option<String>) -> Result<()> {
 			"--raw",
 			"--format=s16le",
 			"--rate=48000",
+			format!("--channels={}", channels).as_str(),
 		])
-		.arg(format!("--channels={}", meta.channels))
 		.stdin(Stdio::piped())
 		.stdout(Stdio::piped())
 		.stderr(Stdio::piped())

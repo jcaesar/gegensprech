@@ -32,7 +32,7 @@ RUN curl -O https://liftm.de/Misc/armv7l-linux-musleabihf-cross-21-11-23.tgz \
        && tar xvf armv7l-linux-musleabihf-cross-21-11-23.tgz -C /usr/local \
        && rm armv7l-linux-musleabihf-cross-21-11-23.tgz
 ENV CC_armv7_unknown_linux_musleabihf=/usr/local/armv7l-linux-musleabihf-cross/bin/armv7l-linux-musleabihf-gcc
-ENV CFLAGS_armv7_unknown_linux_musleabihf="-mfpu=vfpv3-d16"
+ENV CFLAGS_armv7_unknown_linux_musleabihf="-mfpu=neon"
 WORKDIR /root/src
 '
 

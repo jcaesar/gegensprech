@@ -1,5 +1,4 @@
 use anyhow::Result;
-use futures::executor::block_on;
 use rppal::gpio::Gpio;
 use rppal::gpio::InputPin;
 use rppal::gpio::Level;
@@ -172,18 +171,19 @@ pub async fn read(
 ) -> Result<()> {
 	tracing::info!(raspi=?DeviceInfo::new());
 	let mut button = Button::new(EdgeDeb::new(gpio.get(button)?)?);
+	let rt_handle = tokio::runtime::Handle::current();
 	tokio::task::spawn_blocking(move || -> Result<()> {
 		loop {
 			let et = button.next(None)?;
 			trace!(?et);
 			let mut running = running.lock().unwrap();
 			if let Some(running) = running.take() {
-				running.terminate();
+				rt_handle.block_on(running.terminate());
 			}
 			match et {
 				Some(Press::Short(_)) => {
 					let code = parse_morse(&mut button)?;
-					*running = cmds.exec(code);
+					*running = cmds.exec(code, &messages);
 				}
 				Some(Press::LongStart(_)) => {
 					drop(running);
@@ -191,7 +191,9 @@ pub async fn read(
 					tracing::debug!("send");
 					let et = button.next(Some(Instant::now() + Duration::from_secs(20)));
 					trace!(?et, "recording, waiting for LongEnd");
-					messages.blocking_send(block_on(recording.finish())?)?;
+					rt_handle.block_on(async {
+						anyhow::Ok(messages.send(recording.finish().await?).await?)
+					})?;
 				}
 				_ => unreachable!("Waiting for button down, got something else"),
 			};

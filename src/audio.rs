@@ -5,8 +5,9 @@ mod pulse;
 use anyhow::{Context, Result};
 use itertools::Itertools;
 use matrix_sdk::ruma::{events::room::message::AudioInfo, UInt};
-use once_cell::sync::Lazy;
 use std::{
+	collections::VecDeque,
+	io::Cursor,
 	ops::ControlFlow,
 	sync::{Arc, Mutex},
 	time::Duration,
@@ -15,10 +16,16 @@ use tokio::{
 	sync::{mpsc, oneshot},
 	task::{spawn_blocking, JoinHandle},
 };
+use tracing::debug;
 
 use crate::status::{self, AudioStatus};
 
-static MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+static MUTEX: Mutex<()> = Mutex::new(());
+
+#[cfg(not(feature = "audio-as-lib"))]
+use cmd::SAMPLE_RATE;
+#[cfg(feature = "audio-as-lib")]
+use pulse::SAMPLE_RATE;
 
 pub struct Rec {
 	pub data: Vec<u8>,
@@ -40,18 +47,14 @@ pub struct RecProc {
 }
 
 impl RecProc {
-	#[tracing::instrument]
+	//#[tracing::instrument]
 	pub fn start() -> Self {
-		let (done, cont) = oneshot::channel::<()>();
+		let (done, mut cont) = oneshot::channel::<()>();
 		let proc = spawn_blocking(move || {
 			let _guard = MUTEX.lock();
-			#[cfg(not(feature = "audio-as-lib"))]
-			use cmd::SAMPLE_RATE;
-			#[cfg(feature = "audio-as-lib")]
-			use pulse::SAMPLE_RATE;
 			let mut recorded = Vec::with_capacity(SAMPLE_RATE as usize * 2);
 			let mut led_guard = None;
-			let mut sample = |block: &[u8]| {
+			let sample = |block: &[u8]| {
 				for (b1, b2) in block.iter().tuples() {
 					recorded.push(i16::from_le_bytes([*b1, *b2]))
 				}
@@ -68,18 +71,7 @@ impl RecProc {
 			pulse::record(sample)?;
 			#[cfg(not(feature = "audio-as-lib"))]
 			cmd::record(sample)?;
-			let data =
-				ogg_opus::encode::<SAMPLE_RATE, 1>(&recorded[..]).context("OGG Opus encode")?;
-			let info = {
-				let mut ai = AudioInfo::new();
-				ai.duration = Some(Duration::from_secs_f64(
-					recorded.len() as f64 / SAMPLE_RATE as f64,
-				));
-				ai.mimetype = Some("media/ogg".to_owned());
-				ai.size = UInt::new(data.len() as u64);
-				ai
-			};
-			Ok(Rec { info, data })
+			Ok(encode_raw(&recorded)?)
 		});
 		RecProc { done, proc }
 	}
@@ -90,6 +82,52 @@ impl RecProc {
 			.await
 			.context("Recording spawn error")?
 			.context("Recording error")
+	}
+}
+
+pub struct LoopTape {
+	tape: Arc<Mutex<VecDeque<u8>>>,
+}
+
+impl LoopTape {
+	#[tracing::instrument]
+	pub fn start(duration: Duration) -> Self {
+		let bytes = (duration.as_secs_f64() * SAMPLE_RATE as f64) as usize * 2;
+		let tape = Arc::new(Mutex::new(VecDeque::with_capacity(bytes)));
+		let tape_write = tape.clone();
+		debug!(?bytes, "Loop tape buffer created");
+		spawn_blocking(move || {
+			let sample = |block: &[u8]| {
+				let mut tape = tape_write.lock().expect("Poisoned");
+				assert!(block.len() % 2 == 0);
+				while tape.len() > bytes - block.len() {
+					tape.pop_front();
+				}
+				for &b in block.iter() {
+					tape.push_back(b)
+				}
+				Ok(ControlFlow::Continue(()))
+			};
+			#[cfg(feature = "audio-as-lib")]
+			pulse::record(sample)?;
+			#[cfg(not(feature = "audio-as-lib"))]
+			cmd::record(sample)?;
+			anyhow::Ok(())
+		});
+		LoopTape { tape }
+	}
+	#[tracing::instrument(skip(self))]
+	pub fn get(&self, duration: Duration) -> Vec<i16> {
+		let tape = self.tape.lock().expect("Poisoned");
+		let bytes = (duration.as_secs_f64() * SAMPLE_RATE as f64) as usize * 2;
+		tape.iter()
+			.rev()
+			.take(bytes)
+			.rev()
+			.cloned()
+			.tuples()
+			.map(|(b1, b2)| i16::from_le_bytes([b1, b2]))
+			.collect()
 	}
 }
 
@@ -106,16 +144,16 @@ pub async fn play(
 			None => continue,
 		};
 		let (data, mtyp, played) = data;
+		let mut background_cmd = background_cmd.lock().unwrap();
+		if let Some(background_cmd) = background_cmd.take() {
+			background_cmd.terminate().await;
+		}
 		let proc = spawn_blocking(move || -> Result<_> {
-			let mut background_cmd = background_cmd.lock().unwrap();
-			if let Some(background_cmd) = background_cmd.take() {
-				background_cmd.terminate();
-			}
-			let _guard = MUTEX.lock().unwrap();
-			#[cfg(feature = "audio-as-lib")]
-			pulse::play(data, mtyp)?;
-			#[cfg(not(feature = "audio-as-lib"))]
-			cmd::play(data, mtyp)?;
+			let (data, meta) = ogg_opus::decode::<_, 16000>(Cursor::new(data)).context(format!(
+				"Decode {} as OGG Opus",
+				mtyp.as_deref().unwrap_or("MIME unknown")
+			))?;
+			play_raw(&data, meta.channels)?;
 			Ok(())
 		});
 		match proc.await?.context("play") {
@@ -126,4 +164,27 @@ pub async fn play(
 			Err(e) => tracing::error!(?e, "Playback failed"),
 		}
 	}
+}
+
+pub(crate) fn play_raw(data: &[i16], channels: u16) -> Result<()> {
+	let _guard = MUTEX.lock().unwrap();
+	#[cfg(feature = "audio-as-lib")]
+	pulse::play(data, channels.try_into().context("Insane channel count")?)?;
+	#[cfg(not(feature = "audio-as-lib"))]
+	cmd::play(data, channels)?;
+	Ok(())
+}
+
+pub(crate) fn encode_raw(recorded: &[i16]) -> Result<Rec> {
+	let data = ogg_opus::encode::<SAMPLE_RATE, 1>(&recorded[..]).context("OGG Opus encode")?;
+	let info = {
+		let mut ai = AudioInfo::new();
+		ai.duration = Some(Duration::from_secs_f64(
+			recorded.len() as f64 / SAMPLE_RATE as f64,
+		));
+		ai.mimetype = Some("media/ogg".to_owned());
+		ai.size = UInt::new(data.len() as u64);
+		ai
+	};
+	Ok(Rec { info, data })
 }

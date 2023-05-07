@@ -8,10 +8,12 @@ use std::{
 	fs::read,
 	path::Path,
 	process::{self, Child, Stdio},
-	thread::{self, sleep},
 	time::Duration,
 };
-use tracing::{debug, warn};
+use tokio::{sync::mpsc::Sender, task::JoinHandle, time::sleep};
+use tracing::{debug, error, warn};
+
+use crate::audio;
 
 static MORSE_CMDS: &str = "cmds.yaml";
 
@@ -69,33 +71,69 @@ type Cmds = HashMap<MorseWord, Command>;
 
 #[derive(Deserialize, Debug)]
 enum Command {
-	SubProcess { cmd: Vec<String> },
+	SubProcess {
+		cmd: Vec<String>,
+	},
+	LoopTape {
+		#[serde(deserialize_with = "deser_humantime")]
+		time: Duration,
+		#[serde(default = "ftrue")]
+		play: bool,
+		#[serde(default)]
+		send: bool,
+	},
 }
 
-pub struct Running {
-	inner: Option<Child>,
+fn ftrue() -> bool {
+	true
+}
+
+fn deser_humantime<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Duration, D::Error> {
+	Ok(String::deserialize(de)?
+		.parse::<humantime::Duration>()
+		.map_err(serde::de::Error::custom)?
+		.into())
+}
+
+pub enum Running {
+	SubProcess { inner: Option<Child> },
+	Play { task: JoinHandle<Result<()>> },
 }
 
 impl Running {
-	pub fn terminate(mut self) {
-		if let Some(child) = self.inner.take() {
-			terminate_child(child);
+	pub async fn terminate(mut self) {
+		match &mut self {
+			Running::Play { task } => {
+				// In general, playback should be abortable
+				// But that's also for voice messages, so TODO
+				task.await.ok();
+			}
+			Running::SubProcess { inner } => {
+				if let Some(child) = inner.take() {
+					terminate_child(child).await;
+				}
+			}
 		}
 	}
 }
 
 impl Drop for Running {
 	fn drop(&mut self) {
-		if let Some(child) = self.inner.take() {
-			thread::spawn(move || terminate_child(child));
+		match self {
+			Running::Play { .. } => (), // whatev
+			Running::SubProcess { inner } => {
+				if let Some(child) = inner.take() {
+					tokio::spawn(terminate_child(child));
+				}
+			}
 		}
 	}
 }
 
-fn terminate_child(mut child: Child) {
+async fn terminate_child(mut child: Child) {
 	child.interrupt().ok();
 	for _ in 0..10 {
-		sleep(Duration::from_millis(300));
+		sleep(Duration::from_millis(300)).await;
 		match child.try_wait() {
 			Ok(Some(_)) => return,
 			Ok(None) => (),
@@ -112,6 +150,7 @@ fn terminate_child(mut child: Child) {
 
 pub struct ButtonCommands {
 	cmds: Cmds,
+	tape: Option<audio::LoopTape>,
 }
 
 impl ButtonCommands {
@@ -123,19 +162,28 @@ impl ButtonCommands {
 			false => {
 				return Ok(ButtonCommands {
 					cmds: HashMap::new(),
+					tape: None,
 				})
 			}
 		};
 		let cmds = serde_yaml::from_slice::<Cmds>(&file).context("Parse cmd file")?;
 		debug!(?cmds);
-		Ok(ButtonCommands { cmds })
+		let tape = cmds
+			.iter()
+			.filter_map(|cmd| match cmd {
+				(_, Command::LoopTape { time, .. }) => Some(*time),
+				_ => None,
+			})
+			.max()
+			.map(audio::LoopTape::start);
+		Ok(ButtonCommands { cmds, tape })
 	}
 
-	pub(crate) fn exec(&self, cmd: MorseWord) -> Option<Running> {
+	pub(crate) fn exec(&self, cmd: MorseWord, messages: &Sender<audio::Rec>) -> Option<Running> {
 		self.cmds.get(&cmd).and_then(|cmd| match &cmd {
 			Command::SubProcess { cmd } => match &cmd[..] {
 				[] => unreachable!(),
-				[path, args @ ..] => Some(Running {
+				[path, args @ ..] => Some(Running::SubProcess {
 					inner: process::Command::new(path)
 						.args(args)
 						.stdin(Stdio::null())
@@ -143,6 +191,28 @@ impl ButtonCommands {
 						.ok(),
 				}),
 			},
+			Command::LoopTape { time, play, send } => {
+				let samp = self
+					.tape
+					.as_ref()
+					.expect("Initialized to illegal state")
+					.get(*time);
+				debug!(?time, ?play, ?send, samp_len = samp.len(), "LoopTape use");
+				if *send {
+					match audio::encode_raw(&samp) {
+						Ok(enc) => {
+							messages.try_send(enc).ok();
+						}
+						Err(e) => error!("Failed to encode accumulated recording: {}", e),
+					}
+				}
+				if *play {
+					let task = tokio::task::spawn_blocking(move || audio::play_raw(&samp, 1));
+					Some(Running::Play { task })
+				} else {
+					None
+				}
+			}
 		})
 	}
 }

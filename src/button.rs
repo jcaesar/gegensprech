@@ -46,7 +46,7 @@ struct Button {
 impl EdgeRaw {
 	fn new(pin: Pin) -> Result<Self> {
 		let mut pin = pin.into_input_pullup();
-		pin.set_interrupt(Trigger::Both)?;
+		pin.set_interrupt(Trigger::Both, None)?;
 		Ok(Self { pin })
 	}
 	fn current(&self) -> Level {

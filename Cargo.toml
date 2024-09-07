@@ -20,7 +20,7 @@ tracing-subscriber = "0.3.16"
 rpassword = "7.2.0"
 gethostname = "0.4.1"
 futures = "0.3.26"
-rppal = { version = "0.14.1", features = ["embedded-hal", "hal"] }
+rppal = { version = "0.19.0", features = ["embedded-hal", "hal"] }
 matrix-sdk = { version = "0.6.2", features = ["markdown"], default-features = false }
 libpulse-simple-binding = { version = "2.27.1", optional = true }
 libpulse-binding = { version = "2.27.1", optional = true }

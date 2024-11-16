@@ -1,0 +1,13 @@
+[package]
+name = "seed-led-blinky"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "blinky"
+path = "blinky.rs"
+
+[dependencies]
+apa102-spi = "0.4.0"
+rppal = { version = "0.19.0", features = ["hal", "embedded-hal"] }
+smart-leds-trait = "0.3.0"

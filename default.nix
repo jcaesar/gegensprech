@@ -4,7 +4,6 @@ let
 in
   {
     rustPlatform,
-    fetchFromGitHub,
     lib,
     cmake,
     libopus,
@@ -24,8 +23,14 @@ in
         };
       };
 
-      nativeBuildInputs = [cmake pkg-config];
-      buildInputs = [libopus libpulseaudio];
+      nativeBuildInputs = [
+        cmake
+        pkg-config
+      ];
+      buildInputs = [
+        libopus
+        libpulseaudio
+      ];
       buildFeatures = ["audio-as-lib"];
       # libpulse-simple-sys links by name if pkgconfig fails,
       # and that results in a a binary that can't be run

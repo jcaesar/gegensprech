@@ -19,6 +19,6 @@ in
         platforms = lib.platforms.linux;
         maintainers = [lib.maintainers.${author}];
         homepage = "https://github.com/${author}/${name}";
-        mainProgram = "${name}";
+        mainProgram = "blinky";
       };
     }
